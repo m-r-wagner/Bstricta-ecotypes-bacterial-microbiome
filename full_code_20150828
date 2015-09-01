@@ -1,0 +1,2927 @@
+### Analyses by Maggie R. Wagner
+### maggie.r.wagner@gmail.com
+
+## The Figure numbers are out of date-- sorry! I'll fix in a later version ##
+
+# Clear workspace 
+rm(list=ls())
+
+# Make subfolder for plots
+system('mkdir plots')
+
+# Color palettes
+sitePalette <- c("#000000", "#E69F00", "#56B4E9")
+popPalette <- c("#CC79A7", 
+                "goldenrod", "#0072B2","#009E73","grey","#F0E442","lavender",
+                "aquamarine3","darkorchid","cadetblue3","#D55E00")
+agePalette<-c("lightskyblue","blue","black","red")
+
+####### Function: multiplot() credit = cookbook for R #######
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+  
+  numPlots = length(plots)
+  
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+####### Load packages #######
+library(maps)
+library(mapdata)
+library(ape)
+library(phyloseq)
+library(genefilter)
+library(plyr)
+library(dplyr)
+library(doParallel)
+library(vegan)
+library(ggplot2)
+library(grid)
+library(scales)
+library(lme4)
+library(DESeq2)
+library(lmerTest)
+library(reshape2)
+library(BiocParallel)
+library(VennDiagram)
+
+####### Fig. S3: Soil nutrition data #######
+soil<-as.data.frame(read.table("../soildata2013.txt",sep='\t',header=TRUE))
+soil<-subset(soil[,c(1,8:20)],Site!='ALD')
+colnames(soil)[2]<-"pH"
+soil$Site<-factor(soil$Site)
+
+soilPCA<-capscale(soil[,2:14]~1,distance="euclidean")
+summary(soilPCA) # PC1 = 77.45 % variation; # PC2 = 19.87% variation
+soil<-merge(soil,scores(soilPCA,display="sites",choices=c(1:3)),by='row.names') # save first 3 PCo
+pdf(file="plots/FigS3a.pdf",width=11,height=11)
+ggplot(data=subset(soil,Site%in%c("JAM","MAH","SIL")),aes(x=MDS1,y=MDS2,color=Site))+
+  geom_point(size=5)+
+  scale_color_manual(values=sitePalette)+
+  xlab("PC1 [77.5%]")+ylab("PC2 [19.9%]")+
+  theme_classic()+theme(plot.title = element_text(size=24, face="bold"))+
+  theme(axis.title.x=element_text(size=44,face="bold"),axis.text.x=element_text(size=36,face="bold"))+
+  theme(axis.title.y=element_text(size=44,face="bold"),axis.text.y=element_text(size=36,face="bold"))+
+  theme(legend.title= element_text(size=44),legend.text=element_text(size=36))+
+  theme(legend.key.height=unit(2.5,'lines'),legend.key.width=unit(2,'lines'))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.9,.8))
+dev.off()
+
+soil.melted<-melt(soil[,1:15],id.vars=c("Row.names","Site"))
+pdf(file="plots/FigS3b.pdf",width=9,height=8)
+update_geom_defaults("point", list(colour = NULL))
+ggplot(data=subset(soil.melted,Site!='PAR'),aes(x=Site,y=value,color=Site))+
+  facet_wrap(~variable,scales="free")+
+  scale_color_manual(values=sitePalette,name="Site:   ")+
+  geom_boxplot(size=1.5)+
+  theme_classic()+theme(legend.direction="horizontal")+
+  theme(axis.title.x=element_blank(),axis.text.x=element_blank())+
+  theme(axis.title.y=element_blank(),axis.text.y=element_text(size=22,face="bold"))+
+  theme(legend.title= element_text(size=24),legend.text=element_text(size=22,face="bold"))+
+  theme(legend.background = element_rect(fill="gray90", size=.5))+
+  theme(legend.position=c(0.7,0.1),legend.key.height=unit(2,'lines'),legend.key.width=unit(2,'lines'))+
+  theme(strip.background=element_rect(fill="gray90"),strip.text=element_text(size=20,face="bold"))
+update_geom_defaults("point", list(colour = "black"))
+dev.off()
+####### Fig. 1a #######
+# make inset
+pdf(file="plots/Fig1a_inset.pdf",width=7,height=7)
+map(database="state",regions=c("Montana","Idaho", "Wyoming","Oregon","Washington"),
+    xlim=c(-117.25,-111.05),ylim=c(42,49),fill=TRUE,col="white")
+map(database="state",regions=c("Idaho"),add=TRUE,fill=TRUE,col="gray90")
+polygon(x=c(-113,-113,-115,-115),y=c(43.7,46,46,43.7),border="black",lwd=2)
+dev.off()
+
+# load site coordinates
+coords<-as.data.frame(read.table("../site_coords_Ecotypes.txt",sep="\t",header=TRUE))
+
+# make regional map
+pdf(file="plots/Fig1a.pdf",width=5,height=7)
+map(database="county",regions=c("Idaho"),xlim=c(-115,-113),ylim=c(43.7,46))
+polygon(x=c(-113,-113,-115,-115),y=c(43.7,46,46,43.7),border="black",lwd=8)
+#points(x=subset(coords,Site%in%c("Jam","Mah","Sil"))$Lon, y=subset(coords,Site%in%c("Jam","Mah","Sil"))$Lat, pch=17,cex=3)
+points(x=subset(coords,Site=="Jam")$Lon, y=subset(coords,Site=="Jam")$Lat, pch=17,cex=3,col=sitePalette[1])
+points(x=subset(coords,Site=="Mah")$Lon, y=subset(coords,Site=="Mah")$Lat, pch=17,cex=3,col=sitePalette[2])
+points(x=subset(coords,Site=="Sil")$Lon, y=subset(coords,Site=="Sil")$Lat, pch=17,cex=3,col=sitePalette[3])
+points(x=subset(coords,Site%in%c("Mil","Par"))$Lon, y=subset(coords,Site%in%c("Mil","Par"))$Lat, pch=19,cex=3,col="dark grey")
+text(x=c(-113.8,-113.8,-114.6,-113.3,-114.5),
+     y=c(45.1,44.05,45.02,44.5,44.5),
+     Line)=c("JAM","MAH","SIL","MIL","PAR"),
+     col=c(sitePalette,"dark grey","dark grey"),cex=2,font=2,family="Helvetica")
+# add scale bar (50 km calculated using http://www.nhc.noaa.gov/gccalc.shtml)
+polygon(x=c(-113.84,-113.2),y=c(45.5,45.5),lwd=8,border="black")
+text(x=-113.5,y=45.6,Line)="50 km",cex=1.3,font=2)
+dev.off()
+####### Import OTU table, taxonomic assignments, phylogenetic tree, and sample metadata #######
+# and format for input into Phyloseq
+### Import raw OTU table (not copy number corrected yet, still contains bad OTUs)
+# Note: OTUs were picked from raw sequence data that also included root, leaf, and soil samples not
+# included in this experiment (i.e., from greenhouse experiments and other field experiments).
+fullOTU<-as.data.frame(read.table("../Eco_Field_OTU_table_noCNC_noQC.txt",
+                                  sep='\t',header=TRUE))
+# Make OTUs = row names, remove separate OTU_ID column, and convert to data matrix
+rownames(fullOTU)<-fullOTU[,1]
+fullOTU<-data.matrix(fullOTU[,-1])
+
+### Import sample metadata
+fullSMD<-as.data.frame(read.table("../Eco_Field_metadata_noCNC_noQC.txt",
+                                  sep='\t',header=TRUE))
+rownames(fullSMD)<-fullSMD$SampleID # store Sample IDs as row names
+# note: 'newPlate' = MiSeq run
+
+### Import taxonomy assignments
+fullTax<-as.matrix(read.table('../Eco_Field_Tax_table_noCNC_noQC.txt',sep='\t',header=TRUE))
+dimnames(fullTax)[[1]]<-fullTax[,6]  # make OTU_IDs the row names
+fullTax<-fullTax[,-6]  # get rid of OTU_ID column
+
+## Import phylogenetic tree
+fullPhy<-read.tree(file="../Eco_Field_phy_tree_noCNC_noQC.tre")
+####### Make Phyloseq object #######
+fieldEco<-phyloseq(otu_table(fullOTU,taxa_are_rows=TRUE),tax_table(fullTax),sample_data(fullSMD),fullPhy)
+rm(fullOTU,fullTax,fullSMD,fullPhy) # clean up individual components
+## Get sequencing depth for each sample (before copy number correction or removing bad OTUs)
+sample_data(fieldEco)$HQReads<-sample_sums(fieldEco) # add up high-quality reads in each sample
+sample_data(fieldEco)$logHQReads<-log(sample_data(fieldEco)$HQReads) # store natural log of read counts
+####### Remove host sequences/bad OTUs #######
+fieldEco.nobadOTUs<-subset_taxa(fieldEco,Kingdom!='Unassigned' & Class!='Chloroplast' & Family !='mitochondria')
+sample_data(fieldEco.nobadOTUs)$UsableReads<-sample_sums(fieldEco.nobadOTUs)
+####### Remove samples with <800 usable reads #######
+fieldEco.nobadOTUs.highcoverage<-subset_samples(fieldEco.nobadOTUs,UsableReads>=800)
+nsamples(fieldEco.nobadOTUs.highcoverage) # 839 samples remain
+####### Standard thresholding: 5x25 (throw out "non-reproducible" OTUs) #######
+threshold1<-kOverA(5,A=25) # set threshold values (require k samples with A reads)
+fieldEco.nobadOTUs.highcoverage.thresholded<-filter_taxa(fieldEco.nobadOTUs.highcoverage,threshold1,TRUE)
+ntaxa(fieldEco.nobadOTUs.highcoverage.thresholded) # 3719 of 28025 OTUs pass threshold
+####### Copy number correction #######
+## Load copy number estimates:
+CNCest<-as.data.frame(read.table('../Eco_Field_copynumest_forR.txt',sep='\t',header=TRUE))
+fullOTU.CNC<-as.data.frame(as(otu_table(fieldEco.nobadOTUs.highcoverage.thresholded),'matrix')) # copy OTU table from thresholded Phyloseq object
+fullOTU.CNC<-merge(CNCest,fullOTU.CNC,by.y='row.names',by.x='OTU_ID') # merge copy number estimates with OTU table
+rownames(fullOTU.CNC)<-fullOTU.CNC$OTU_ID # restore OTU_IDs as row names
+fullOTU.CNC<-fullOTU.CNC[,3:dim(fullOTU.CNC)[2]]/fullOTU.CNC[,2] # divide OTU counts by corresponding copy number estimate (Col 1 = OTU_ID, Col 2 = copy number estimates)
+fullOTU.CNC<-data.matrix(ceiling(fullOTU.CNC)) # round OTU counts up to nearest integer
+## Replace OTU table of master Phyloseq object with copy number corrected version:
+fieldEco.nobadOTUs.highcoverage.thresholded.CNC<-fieldEco.nobadOTUs.highcoverage.thresholded # copy Phyloseq object
+otu_table(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)<-otu_table(fullOTU.CNC,taxa_are_rows=TRUE) # replace OTU table with copy number-corrected version
+rm(CNCest,fieldEco,fieldEco.nobadOTUs,fieldEco.nobadOTUs.highcoverage,fieldEco.nobadOTUs.highcoverage.thresholded,fullOTU.CNC) # clean up- all data are now stored in Phyloseq object
+####### Save total number of observations in sample metadata #######
+# This is the covariate we will include in statistical models to control for sequencing depth # 
+sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)$Obs<-sample_sums(fieldEco.nobadOTUs.highcoverage.thresholded.CNC) # add up "good" OTU observations in each sample
+sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)$logObs<-log(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)$Obs) # store natural log of "good" OTU observations
+####### How many reads per sample? #######
+mean(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$HQReads) # mean = 75397.92 'quality' reads/sample
+sd(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$HQReads) # st dev = 38847.04 'quality' reads/sample
+
+mean(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$UsableReads) # mean = 68769.64 'usable' reads/sample
+sd(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$UsableReads) # st dev = 40481.56 'usable' reads/sample
+
+mean(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$Obs) # mean = 27763.57 'good' observations/sample (copy number corrected bacterial OTU reads)
+sd(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame")$Obs) # st dev = 15790.98 'good' observations/sample (copy number corrected bacterial OTU reads)
+####### Exclude high-mortality sites and divide into roots and leaves  #######
+## First, recode Cohort, Year Harvested as factors:
+allSMD<-as.data.frame(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)) # temporarily extract into data frame
+allSMD$Cohort<-factor(allSMD$Cohort)
+allSMD$Harvested<-factor(allSMD$Harvested)
+sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC)<-sample_data(allSMD) # replace old sample data in phyloseq object
+rm(allSMD) # clean up
+
+## Then save full dataset:
+save(fieldEco.nobadOTUs.highcoverage.thresholded.CNC,file="Phyloseq_masterFieldEco_thresholded_CNC.RData")
+
+allsmd.leaf<-subset(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame"),Genotype!='soil' & Type=='leaf'&Age!='Endogenous')
+allsmd.root<-subset(as(sample_data(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),"data.frame"),Genotype!='soil' & Type=='root'&Age!='Endogenous')
+
+##Table S1: Poor survival at Mil and Par ##
+table(allsmd.leaf$Site,allsmd.leaf$Age)
+table(allsmd.root$Site,allsmd.root$Age)
+rm(allsmd.leaf,allsmd.root)
+
+## Due to poor survival at gardens Par and Mil (resulting in unbalanced design),
+## we exclude samples from those sites from further analysis:
+fieldEco.thresholded.CNC.3<-subset_samples(fieldEco.nobadOTUs.highcoverage.thresholded.CNC,Site %in% c('Jam','Mah','Sil'))
+
+## Extract root samples (keeping endogenous plant samples for now) (exclude leaves and bulk soils):
+# We want to look at roots of endogenous control plants to check for any lingering effects of potting soil
+root3.withEndog<-subset_samples(fieldEco.thresholded.CNC.3,Type=='root')
+leaf3.withEndog<-subset_samples(fieldEco.thresholded.CNC.3,Type=='leaf')
+####### Extract soil samples for later use and PCoA leaves/roots/soil together #######
+soil.3<-subset_samples(fieldEco.thresholded.CNC.3,Type=='soil')
+
+summary(as(sample_data(fieldEco.thresholded.CNC.3),'data.frame'))
+
+
+####### Define zero-tolerant function for calculating geometric means (credit: P.J. McMurdie) #######
+gm_mean = function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
+####### Regularized log Normalization #######
+## Apply regularized log normalization
+leaf3.withEndog.rlog<-leaf3.withEndog # copy Phyloseq object
+leaf3.dds<-phyloseq_to_deseq2(leaf3.withEndog.rlog,~Site+Genotype+Site:Genotype+Age+Harvested) # Change to DESeq2 object
+leaf3.dds = estimateSizeFactors(leaf3.dds, geoMeans = apply(counts(leaf3.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+leaf3.rld <- DESeq2::rlog(leaf3.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+leaf3.rlogMat <- GenomicRanges::assay(leaf3.rld) # Extract transformed OTU table
+otu_table(leaf3.withEndog.rlog) <- otu_table(leaf3.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+save(leaf3.withEndog.rlog,file="Phyloseq_leaf3_wEndog_rlog.RData")
+rm(leaf3.dds,leaf3.rld,leaf3.rlogMat) # Clean up
+
+root3.withEndog.rlog<-root3.withEndog # copy Phyloseq object
+root3.dds<-phyloseq_to_deseq2(root3.withEndog.rlog,~Site+Genotype+Site:Genotype+Age+Harvested) # Change to DESeq2 object
+root3.dds = estimateSizeFactors(root3.dds, geoMeans = apply(counts(root3.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+root3.rld <- DESeq2::rlog(root3.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+root3.rlogMat <- GenomicRanges::assay(root3.rld) # Extract transformed OTU table
+otu_table(root3.withEndog.rlog) <- otu_table(root3.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+save(root3.withEndog.rlog,file="Phyloseq_root3_wEndog_rlog.RData")
+rm(root3.dds,root3.rld,root3.rlogMat) # Clean up
+####### Make taxonomic table data frame #######
+taxtable<-as.data.frame(as.matrix(tax_table(root3.withEndog.rlog)))
+taxtable$OTU<-rownames(taxtable)
+####### Calculate UniFrac distances #######
+registerDoParallel(cores=4)
+## Weighted UniFrac distances
+wUF.root3.withEndog<-UniFrac(root3.withEndog.rlog,weighted=TRUE,parallel=TRUE)
+wUF.leaf3.withEndog<-UniFrac(leaf3.withEndog.rlog,weighted=TRUE,parallel=TRUE)
+
+## Unweighted UniFrac distances
+uUF.root3.withEndog<-UniFrac(root3.withEndog.rlog,weighted=FALSE,parallel=TRUE)
+uUF.leaf3.withEndog<-UniFrac(leaf3.withEndog.rlog,weighted=FALSE,parallel=TRUE)
+####### PCoA using Capscale to control for technical covariates: MiSeq run and total # of observations ######
+cap.wUF.root3.withEndog<-capscale(wUF.root3.withEndog~1+Condition(newPlate)+Condition(logObs),data=as(sample_data(root3.withEndog),'data.frame'))
+cap.wUF.leaf3.withEndog<-capscale(wUF.leaf3.withEndog~1+Condition(newPlate)+Condition(logObs),data=as(sample_data(leaf3.withEndog),'data.frame'))
+cap.uUF.root3.withEndog<-capscale(uUF.root3.withEndog~1+Condition(newPlate)+Condition(logObs),data=as(sample_data(root3.withEndog),'data.frame'))
+cap.uUF.leaf3.withEndog<-capscale(uUF.leaf3.withEndog~1+Condition(newPlate)+Condition(logObs),data=as(sample_data(leaf3.withEndog),'data.frame'))
+####### Fig. S5: Scree plots #######
+pdf(file="plots/FigS5a.pdf")
+barplot(cap.wUF.leaf3.withEndog$CA$eig[1:20]/sum(cap.wUF.leaf3.withEndog$CA$eig),
+        main="Leaves: weighted UniFrac",xlab="Principal coordinate",ylab="Proportion Variance",
+        cex.lab=2,cex.main=2.5,cex.axis=1.5,font.axis=2,font.main=2,font.lab=2,xaxt='n')
+dev.off()
+pdf(file="plots/FigS5b.pdf")
+barplot(cap.wUF.root3.withEndog$CA$eig[1:20]/sum(cap.wUF.root3.withEndog$CA$eig),
+        main="Roots: weighted UniFrac",xlab="Principal coordinate",ylab="Proportion Variance",
+        cex.lab=2,cex.main=2.5,cex.axis=1.5,font.axis=2,font.main=2,font.lab=2,xaxt='n')
+dev.off()
+pdf(file="plots/FigS5c.pdf")
+barplot(cap.uUF.leaf3.withEndog$CA$eig[1:20]/sum(cap.uUF.leaf3.withEndog$CA$eig),
+        main="Leaves: unweighted UniFrac",xlab="Principal coordinate",ylab="Proportion Variance",
+        cex.lab=2,cex.main=2.5,cex.axis=1.5,font.axis=2,font.main=2,font.lab=2,xaxt='n')
+dev.off()
+pdf(file="plots/FigS5d.pdf")
+barplot(cap.uUF.root3.withEndog$CA$eig[1:20]/sum(cap.uUF.root3.withEndog$CA$eig),
+        main="Roots: unweighted UniFrac",xlab="Principal coordinate",ylab="Proportion Variance",
+        cex.lab=2,cex.main=2.5,cex.axis=1.5,font.axis=2,font.main=2,font.lab=2,xaxt='n')
+dev.off()
+####### How much variation is explained by the top 3 PCo axes? #######
+sink("ordination_top3_cumulative_PVEs.txt")
+print("percent variance explained by top 3 PCo:")
+print("weighted UniFrac, roots:")
+sum(cap.wUF.root3.withEndog$CA$eig[1:3])/sum(cap.wUF.root3.withEndog$CA$eig)  # 0.5711
+print("weighted UniFrac, leaves:")
+sum(cap.wUF.leaf3.withEndog$CA$eig[1:3])/sum(cap.wUF.leaf3.withEndog$CA$eig)  # 0.6694
+print("unweighted UniFrac, roots:")
+sum(cap.uUF.root3.withEndog$CA$eig[1:3])/sum(cap.uUF.root3.withEndog$CA$eig)  # 0.4622
+print("unweighted UniFrac, leaves:")
+sum(cap.uUF.leaf3.withEndog$CA$eig[1:3])/sum(cap.uUF.leaf3.withEndog$CA$eig)  # 0.3698
+sink()
+####### Fig. 7b: weighted UniFrac Ordination ~ Age #######
+pdf(file="plots/Fig7b.pdf",width=15,height=9)
+multiplot(plot_ordination(leaf3.withEndog,cap.wUF.leaf3.withEndog,type="samples",axes=1:2,color="Age")+
+            scale_colour_manual(values=agePalette,name="Plant age\n(years)")+
+            geom_point(size=4,alpha=1)+
+            xlab("PCo1 [45.1%]")+ylab("PCo2 [17.2%]")+
+            ggtitle("Leaves")+theme_classic()+
+            theme(plot.title = element_text(size=40, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=28,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=28,face="bold"))+
+            theme(legend.title= element_text(size=24),legend.text=element_text(size=22,face="bold"))+
+            theme(legend.key.width=unit(2,'lines'),legend.key.height=unit(2,'lines'))+
+            theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.25,.2)),
+          plot_ordination(root3.withEndog,cap.wUF.root3.withEndog,type="samples",axes=2:3,color="Age")+
+            scale_colour_manual(values=agePalette,guide=FALSE)+
+            geom_point(size=4,alpha=1)+
+            xlab("PCo2 [14.6%]")+ylab("PCo3 [10.3%]")+
+            ggtitle("Roots")+theme_classic()+
+            theme(plot.title = element_text(size=40, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=28,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=28,face="bold"))+
+            theme(legend.title= element_text(size=32),legend.text=element_text(size=28))+
+            theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.25,.15))+
+            theme(axis.ticks=element_blank(),panel.grid.minor=element_blank()),
+          cols=2)
+dev.off()
+
+pdf(file="plots/Fig7b_leaf.pdf")
+plot_ordination(leaf3.withEndog,cap.wUF.leaf3.withEndog,type="samples",axes=1:2,color="Age")+
+  scale_colour_manual(values=agePalette)+
+  geom_point(size=4,alpha=1)+
+  xlab("PCo1 [45.1%]")+ylab("PCo2 [17.2%]")+
+  ggtitle("Leaves")+theme_classic()+
+  theme(plot.title = element_text(size=24, face="bold"))+
+  theme(axis.title.x=element_text(size=24,face="bold"),axis.text.x=element_text(size=22,face="bold"))+
+  theme(axis.title.y=element_text(size=24,face="bold"),axis.text.y=element_text(size=22,face="bold"))+
+  theme(legend.title= element_text(size=24),legend.text=element_text(size=22))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.2,.2))
+dev.off()
+
+pdf(file="plots/Fig7b_root.pdf")
+plot_ordination(root3.withEndog,cap.wUF.root3.withEndog,type="samples",axes=2:3,color="Age")+
+  scale_colour_manual(values=agePalette,guide=FALSE)+
+  geom_point(size=4,alpha=1)+
+  xlab("PCo2 [14.6%]")+ylab("PCo3 [10.3%]")+
+  ggtitle("Roots")+theme_classic()+
+  theme(plot.title = element_text(size=24, face="bold"))+
+  theme(axis.title.x=element_text(size=24,face="bold"),axis.text.x=element_text(size=22,face="bold"))+
+  theme(axis.title.y=element_text(size=24,face="bold"),axis.text.y=element_text(size=22,face="bold"))+
+  theme(legend.title= element_text(size=24),legend.text=element_text(size=22))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.25,.15))+
+  theme(axis.ticks=element_blank(),panel.grid.minor=element_blank())
+dev.off()
+####### Fig. 3b: weighted UniFrac Ordination ~ Site #######
+pdf("plots/Fig3b.pdf",width=17,height=11)
+multiplot(plot_ordination(leaf3.withEndog,cap.wUF.leaf3.withEndog,type="samples",axes=1:2,color="Site")+
+            scale_colour_manual(values=sitePalette)+
+            geom_point(size=4,alpha=1)+
+            xlab("PCo1 [45.1%]")+ylab("PCo2 [17.2%]")+
+            ggtitle("Leaves")+theme_classic()+
+            theme(plot.title = element_text(size=44, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=30,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=30,face="bold"))+
+            theme(legend.title= element_text(size=40),legend.text=element_text(size=36,face="bold"))+
+            theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2,"lines"))+
+            theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.15,.2)),
+          plot_ordination(root3.withEndog,cap.wUF.root3.withEndog,type="samples",axes=1:2,color="Site")+
+            scale_colour_manual(values=sitePalette,guide=FALSE)+
+            geom_point(size=4,alpha=1)+
+            xlab("PCo1 [32.2%]")+ylab("PCo2 [14.6%]")+
+            ggtitle("Roots")+theme_classic()+
+            theme(plot.title = element_text(size=44, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=30,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=30,face="bold")),
+          cols=2)
+dev.off()
+####### Fig. S4: unweighted UniFrac Ordination ~ Site  #######
+pdf(file="plots/FigS4a.pdf",width=9,height=8)
+plot_ordination(leaf3.withEndog,cap.uUF.leaf3.withEndog,type="samples",axes=1:2,color="Site")+
+  geom_point(size=3)+
+  scale_colour_manual(values=sitePalette)+
+  ggtitle("Leaves")+xlab("PCo1 [21.9%]")+ylab("PCo2 [9.2%]")+
+  theme_classic()+
+  theme(plot.title=element_text(size=28,face="bold"))+
+  theme(legend.title=element_text(size=28,face="bold"),legend.text=element_text(size=26,face="bold"),legend.position=c(0.9,0.9))+
+  theme(legend.background=element_rect(fill="gray90"),legend.key.height=unit(1.5,"lines"),legend.key.width=unit(1.5,"lines"))+
+  theme(axis.title.y=element_text(size=26,face="bold"),axis.text.y=element_text(size=24,face="bold"))+
+  theme(axis.title.x=element_text(size=26,face="bold"),axis.text.x=element_text(size=24,face="bold"))
+dev.off()
+
+pdf(file="plots/FigS4b.pdf",width=9,height=8)
+plot_ordination(root3.withEndog,cap.uUF.root3.withEndog,type="samples",axes=1:2,color="Site")+
+  geom_point(size=3)+
+  scale_colour_manual(values=sitePalette)+
+  ggtitle("Roots")+xlab("PCo1 [29.6%]")+ylab("PCo2 [9.5%]")+
+  theme_classic()+
+  theme(plot.title=element_text(size=28,face="bold"))+
+  theme(legend.title=element_text(size=28,face="bold"),legend.text=element_text(size=26,face="bold"),legend.position=c(0.9,0.9))+
+  theme(legend.background=element_rect(fill="gray90"),legend.key.height=unit(1.5,"lines"),legend.key.width=unit(1.5,"lines"))+
+  theme(axis.title.y=element_text(size=26,face="bold"),axis.text.y=element_text(size=24,face="bold"))+
+  theme(axis.title.x=element_text(size=26,face="bold"),axis.text.x=element_text(size=24,face="bold"))
+dev.off()
+####### Save major PCoA axes for use in LMMs: #######
+leaf3.smd.withEndog<-as(sample_data(leaf3.withEndog),'data.frame')
+leaf3.smd.withEndog<-merge(leaf3.smd.withEndog,as.data.frame(cap.wUF.leaf3.withEndog$CA$u[,1:3]),by.x="SampleID",by.y="row.names")
+leaf3.smd.withEndog<-merge(leaf3.smd.withEndog,as.data.frame(cap.uUF.leaf3.withEndog$CA$u[,1:3]),by.x="SampleID",by.y="row.names")
+root3.smd.withEndog<-as(sample_data(root3.withEndog),'data.frame')
+root3.smd.withEndog<-merge(root3.smd.withEndog,as.data.frame(cap.wUF.root3.withEndog$CA$u[,1:3]),by.x="SampleID",by.y="row.names")
+root3.smd.withEndog<-merge(root3.smd.withEndog,as.data.frame(cap.uUF.root3.withEndog$CA$u[,1:3]),by.x="SampleID",by.y="row.names")
+colnames(leaf3.smd.withEndog)[23:28]<-c("wUF1","wUF2","wUF3","uUF1","uUF2","uUF3")
+colnames(root3.smd.withEndog)[23:28]<-c("wUF1","wUF2","wUF3","uUF1","uUF2","uUF3")
+####### Save alpha diversity estimates for use in LMMs: #######
+leaf3.smd.withEndog<-merge(leaf3.smd.withEndog,as.data.frame(estimate_richness(leaf3.withEndog,measures=c("Observed","Shannon","Chao1"))),
+                 by.x="SampleID",by.y="row.names")
+leaf3.smd.withEndog$expShannon<-exp(leaf3.smd.withEndog$Shannon) # Shannon effective richness estimate = e^(Shannon entropy)
+root3.smd.withEndog<-merge(root3.smd.withEndog,as.data.frame(estimate_richness(root3.withEndog,measures=c("Observed","Shannon","Chao1"))),
+                 by.x="SampleID",by.y="row.names")
+root3.smd.withEndog$expShannon<-exp(root3.smd.withEndog$Shannon) # Shannon effective richness estimate = e^(Shannon entropy)
+####### Calculate relative abundance of each OTU across entire dataset (for roots & leaves separately) #######
+relabund.leaf.OTU<-data.frame("Abundance"=taxa_sums(leaf3.withEndog))
+relabund.leaf.OTU$Taxon<-rownames(relabund.leaf.OTU)
+relabund.leaf.OTU$RelAbund<-relabund.leaf.OTU$Abundance/sum(taxa_sums(leaf3.withEndog))
+
+relabund.root.OTU<-data.frame("Abundance"=taxa_sums(root3.withEndog))
+relabund.root.OTU$Taxon<-rownames(relabund.root.OTU)
+relabund.root.OTU$RelAbund<-relabund.root.OTU$Abundance/sum(taxa_sums(root3.withEndog))
+####### Calculate relative abundances of families, orders, classes, phyla ####### 
+leaf3.withEndog<-prune_taxa(taxa_sums(leaf3.withEndog)>0,leaf3.withEndog); ntaxa(leaf3.withEndog) # 3638 of 3719 OTUs remain
+root3.withEndog<-prune_taxa(taxa_sums(root3.withEndog)>0,root3.withEndog); ntaxa(root3.withEndog) # 3708 of 3719 OTUs remain
+
+# Leaf: family
+leaf3.withEndog.fam<-tax_glom(leaf3.withEndog,taxrank="Family")
+taxa_names(leaf3.withEndog.fam)<-as.data.frame(tax_table(leaf3.withEndog.fam))$Family  # update taxa names
+relabund.leaf.fam<-data.frame("Abundance"=taxa_sums(leaf3.withEndog.fam))
+relabund.leaf.fam$Taxon<-rownames(relabund.leaf.fam)
+relabund.leaf.fam$RelAbund<-relabund.leaf.fam$Abundance/sum(taxa_sums(leaf3.withEndog.fam))
+# Leaf: order
+leaf3.withEndog.ord<-tax_glom(leaf3.withEndog,taxrank="Order")
+taxa_names(leaf3.withEndog.ord)<-as.data.frame(tax_table(leaf3.withEndog.ord))$Order  # update taxa names
+relabund.leaf.ord<-data.frame("Abundance"=taxa_sums(leaf3.withEndog.ord))
+relabund.leaf.ord$Taxon<-rownames(relabund.leaf.ord)
+relabund.leaf.ord$RelAbund<-relabund.leaf.ord$Abundance/sum(taxa_sums(leaf3.withEndog.ord))
+# Leaf: class
+leaf3.withEndog.cla<-tax_glom(leaf3.withEndog,taxrank="Class")
+taxa_names(leaf3.withEndog.cla)<-as.data.frame(tax_table(leaf3.withEndog.cla))$Class  # update taxa names
+relabund.leaf.cla<-data.frame("Abundance"=taxa_sums(leaf3.withEndog.cla))
+relabund.leaf.cla$Taxon<-rownames(relabund.leaf.cla)
+relabund.leaf.cla$RelAbund<-relabund.leaf.cla$Abundance/sum(taxa_sums(leaf3.withEndog.cla))
+# Leaf: phylum
+leaf3.withEndog.phy<-tax_glom(leaf3.withEndog,taxrank="Phylum")
+taxa_names(leaf3.withEndog.phy)<-as.data.frame(tax_table(leaf3.withEndog.phy))$Phylum  # update taxa names
+relabund.leaf.phy<-data.frame("Abundance"=taxa_sums(leaf3.withEndog.phy))
+relabund.leaf.phy$Taxon<-rownames(relabund.leaf.phy)
+relabund.leaf.phy$RelAbund<-relabund.leaf.phy$Abundance/sum(taxa_sums(leaf3.withEndog.phy))
+rm(leaf3.withEndog.fam,leaf3.withEndog.ord,leaf3.withEndog.cla,leaf3.withEndog.phy)
+
+# root: family
+root3.withEndog.fam<-tax_glom(root3.withEndog,taxrank="Family")
+taxa_names(root3.withEndog.fam)<-as.data.frame(tax_table(root3.withEndog.fam))$Family  # update taxa names
+relabund.root.fam<-data.frame("Abundance"=taxa_sums(root3.withEndog.fam))
+relabund.root.fam$Taxon<-rownames(relabund.root.fam)
+relabund.root.fam$RelAbund<-relabund.root.fam$Abundance/sum(taxa_sums(root3.withEndog.fam))
+# root: order
+root3.withEndog.ord<-tax_glom(root3.withEndog,taxrank="Order")
+taxa_names(root3.withEndog.ord)<-as.data.frame(tax_table(root3.withEndog.ord))$Order  # update taxa names
+relabund.root.ord<-data.frame("Abundance"=taxa_sums(root3.withEndog.ord))
+relabund.root.ord$Taxon<-rownames(relabund.root.ord)
+relabund.root.ord$RelAbund<-relabund.root.ord$Abundance/sum(taxa_sums(root3.withEndog.ord))
+# root: class
+root3.withEndog.cla<-tax_glom(root3.withEndog,taxrank="Class")
+taxa_names(root3.withEndog.cla)<-as.data.frame(tax_table(root3.withEndog.cla))$Class  # update taxa names
+relabund.root.cla<-data.frame("Abundance"=taxa_sums(root3.withEndog.cla))
+relabund.root.cla$Taxon<-rownames(relabund.root.cla)
+relabund.root.cla$RelAbund<-relabund.root.cla$Abundance/sum(taxa_sums(root3.withEndog.cla))
+# root: phylum
+root3.withEndog.phy<-tax_glom(root3.withEndog,taxrank="Phylum")
+taxa_names(root3.withEndog.phy)<-as.data.frame(tax_table(root3.withEndog.phy))$Phylum  # update taxa names
+relabund.root.phy<-data.frame("Abundance"=taxa_sums(root3.withEndog.phy))
+relabund.root.phy$Taxon<-rownames(relabund.root.phy)
+relabund.root.phy$RelAbund<-relabund.root.phy$Abundance/sum(taxa_sums(root3.withEndog.phy))
+rm(root3.withEndog.fam,root3.withEndog.ord,root3.withEndog.cla,root3.withEndog.phy)
+####### How many OTUs were exclusively observed in leaves/roots? #######
+# Remove OTUs with 0 observations separately in leaves & roots:
+leafOTUs<-taxa_names(prune_taxa(taxa_sums(leaf3.withEndog)>0,leaf3.withEndog))
+rootOTUs<-taxa_names(prune_taxa(taxa_sums(root3.withEndog)>0,root3.withEndog))
+
+# Which OTUs were found only in leaves?
+leafonly<-(setdiff(leafOTUs,rootOTUs)); length(leafonly) # N=6
+# Which OTUs were found only in roots?
+rootonly<-(setdiff(rootOTUs,leafOTUs)); length(rootonly) # N=76
+###### Fig. S2 : How abundant were these OTUs? #######
+pdf(file="plots/FigS2a.pdf")
+ggplot(relabund.leaf.OTU,aes(x=log(RelAbund)))+
+  geom_density(aes(fill="all leaf OTUs\n",colour="all leaf OTUs\n"),alpha=0.3,position="identity")+
+  geom_density(data=subset(relabund.leaf.OTU,Taxon%in%leafonly),aes(x=log(RelAbund),colour="OTUs exclusively\nfound in leaves",fill="OTUs exclusively\nfound in leaves"),alpha=0.5,position="identity")+
+  scale_x_continuous(labels=function(x) format(exp(x),digits=4),breaks=c(log(0.0000001),log(0.00001),log(0.001),log(0.1)))+
+  scale_fill_manual(values=c("forest green","green"),name="")+
+  scale_colour_manual(values=c("forest green","green"),name="")+
+  theme_classic()+xlab("Relative abundance")+theme(legend.position=c(0.8,0.9))+
+  theme(legend.title = element_text(size=20, face="bold"), legend.text = element_text(size=28,face="bold"))+
+  theme(axis.title.x = element_text(size=36,face="bold"), axis.text.x = element_text(size=30,face="bold"))+
+  theme(axis.title.y = element_text(size=36,face="bold"), axis.text.y = element_text(size=30,face="bold"))
+dev.off()
+
+pdf(file="plots/FigS2b.pdf")
+ggplot(relabund.root.OTU,aes(x=log(RelAbund)))+
+  geom_density(aes(fill="all root OTUs\n",colour="all root OTUs\n"),alpha=0.3,position="identity")+
+  geom_density(data=subset(relabund.root.OTU,Taxon%in%rootonly),aes(x=log(RelAbund),colour="OTUs exclusively\nfound in roots",fill="OTUs exclusively\nfound in roots"),alpha=0.5,position="identity")+
+  scale_x_continuous(labels=function(x) format(exp(x),digits=4),breaks=c(log(0.0000001),log(0.00001),log(0.001),log(0.1)))+
+  scale_fill_manual(values=c("dark grey","black"),name="")+
+  scale_colour_manual(values=c("dark grey","black"),name="")+
+  theme_classic()+xlab("Relative abundance")+theme(legend.position=c(0.8,0.8))+
+  theme(legend.title = element_text(size=20, face="bold"), legend.text = element_text(size=28,face="bold"))+
+  theme(axis.title.x = element_text(size=36,face="bold"), axis.text.x = element_text(size=30,face="bold"))+
+  theme(axis.title.y = element_text(size=36,face="bold"), axis.text.y = element_text(size=30,face="bold"))
+dev.off()
+###### # WEIGHTED percentage of OTUs found exclusively in leaves, roots: #######
+sum(subset(relabund.leaf.OTU,Taxon%in%leafonly)$RelAbund) # 6.05324e-06
+sum(subset(relabund.root.OTU,Taxon%in%rootonly)$RelAbund) # 0.003036844
+####### Remove endogenous plants: only experimental plants in analyses from this point on #######
+leaf3.smd<-subset(leaf3.smd.withEndog,Age!='Endogenous')
+root3.smd<-subset(root3.smd.withEndog,Age!='Endogenous')
+leaf3.smd$Age<-factor(leaf3.smd$Age)
+root3.smd$Age<-factor(root3.smd$Age)
+leaf3.smd$Genotype<-factor(leaf3.smd$Genotype)
+root3.smd$Genotype<-factor(root3.smd$Genotype)
+# Make Phyloseq objects with only the experimental plants
+root3<-subset_samples(root3.withEndog,Age!='Endogenous') # N = 310
+leaf3<-subset_samples(leaf3.withEndog,Age!='Endogenous') # N = 306
+root3.rlog<-subset_samples(root3.withEndog.rlog,Age!='Endogenous') # N = 310
+leaf3.rlog<-subset_samples(leaf3.withEndog.rlog,Age!='Endogenous') # N = 306
+####### How many individual plants represented in this dataset? #######
+length(union(levels(as(sample_data(leaf3),'data.frame')$Plant_ID),levels(as(sample_data(root3),'data.frame')$Plant_ID)))
+# 440
+####### Function: r2.LMM() => estimate R^2 for a model as correlation between fitted and observed values #######
+r2.LMM <- function(m) {
+  lmfit <-  lm(model.response(model.frame(m)) ~ fitted(m))
+  summary(lmfit)$r.squared
+}
+####### Function: beta diversity LMMstats() => *without log Obs as covariates*  (because sequencing depth was already partialled out during ordination) #####
+betaLMMstats<-function(data,resp,reml){
+  df<-data
+  stats<-data.frame('Response'=character(0),'Term'=character(0), 'F or ChiSq'= numeric(0), 'df' = integer(0), 'ddf'=numeric(0),'P'=numeric(0))
+  model<-lmer(df[[resp]]~Genotype*Site + Genotype*Age + Harvested +(1|Site:Block)+(1|Genotype:Line),data=df,REML=reml)
+  fixed<-anova(model,type=3,ddf='Satterthwaite')
+  print(fixed)
+  for (i in 1:length(rownames(fixed))) { # loop through fixed effects
+    newrow<-data.frame('Response'=resp,'Term'=rownames(fixed)[i],'F or ChiSq'= fixed[i,5], 'df' = fixed[i,3], 'ddf'=fixed[i,4],'P'=fixed[i,6])
+    stats<-rbind(stats,newrow)
+  }
+  ### now do random effects ### 
+  
+  BlkLRT<-rand(model)
+  Blk<-data.frame('Response'=resp,'Term'='Block','F.or.ChiSq'=BlkLRT$rand.table$Chi.sq[1],"df"=BlkLRT$rand.table$Chi.DF[1],'ddf'=Inf,'P'=BlkLRT$rand.table$p.value[1])
+  Line<-data.frame('Response'=resp,'Term'='Line','F.or.ChiSq'=BlkLRT$rand.table$Chi.sq[2],"df"=BlkLRT$rand.table$Chi.DF[2],'ddf'=Inf,'P'=BlkLRT$rand.table$p.value[2])
+  stats<-rbind(stats,Blk,Line)
+  
+  return(stats)
+}
+####### Function: alpha diversity LMMstats() => *with log Obs and Plate as covariates*  #####
+alphaLMMstats<-function(data,resp,reml){
+  df<-data
+  stats<-data.frame('Response'=character(0),'Term'=character(0), 'F or ChiSq'= numeric(0), 'df' = integer(0), 'ddf'=numeric(0),'P'=numeric(0))
+  model<-lmer(df[[resp]]~Genotype*Site + Genotype*Age + Harvested +(1|Site:Block)+(1|Genotype:Line)+(1|newPlate)+logObs,data=df,REML=reml)
+  fixed<-anova(model,type=3,ddf='Satterthwaite')
+  print(fixed)
+  for (i in 1:length(rownames(fixed))) { # loop through fixed effects
+    newrow<-data.frame('Response'=resp,'Term'=rownames(fixed)[i],'F or ChiSq'= fixed[i,5], 'df' = fixed[i,3], 'ddf'=fixed[i,4],'P'=fixed[i,6])
+    stats<-rbind(stats,newrow)
+  }
+  ### now do random effects ### 
+  BlkLRT<-rand(model)
+  Blk<-data.frame('Response'=resp,'Term'='Block','F.or.ChiSq'=BlkLRT$rand.table$Chi.sq[1],"df"=BlkLRT$rand.table$Chi.DF[1],'ddf'=Inf,'P'=BlkLRT$rand.table$p.value[1])
+  Line<-data.frame('Response'=resp,'Term'='Line','F.or.ChiSq'=BlkLRT$rand.table$Chi.sq[2],"df"=BlkLRT$rand.table$Chi.DF[2],'ddf'=Inf,'P'=BlkLRT$rand.table$p.value[2])
+  Plate<-data.frame('Response'=resp,'Term'='Plate','F.or.ChiSq'=BlkLRT$rand.table$Chi.sq[3],"df"=BlkLRT$rand.table$Chi.DF[3],'ddf'=Inf,'P'=BlkLRT$rand.table$p.value[3])
+  stats<-rbind(stats,Blk,Line,Plate)
+  return(stats)
+}
+####### Function: Pcorrect() => Correct p-values for multiple tests #######
+Pcorrect<-function(stats,method){
+  df<-stats # copy stats into new data frame
+  if ("P" %in% colnames(df)){ names(df)[names(df)=="P"] <- "P_uncorrected" }
+  # loop through and generate corrected p-values for each term
+  df$P_corrected<-7  # initialize as 7 (or some other impossible value) so it sticks out as a flag in case of bugs
+  temp0<-df[0,] # copy the stats data frame
+  for (i in 1:length(levels(df$Term))){
+    thisterm<-levels(df$Term)[i]
+    temp<-subset(df,Term==thisterm) # extract stats for this Term for all tests (i.e., correct separately for each effect tested)
+    temp$P_corrected<-p.adjust(temp$P_uncorrected,method=method) # apply p.adjust
+    temp0<-rbind(temp0,temp)
+    rm(temp)
+  }
+  return(temp0)
+}
+####### Function: addstars() => add stars to denote significance after P value correction #######
+addstars<-function(results){
+  df<-results
+  df$Sig<-"" # create new column for stars but initialize as blanks
+  for (i in 1:dim(df)[1]) { # loop through each row
+    thisP<-df[i,]$P_corrected # store corrected P-value for this taxon
+    if (0.05>thisP && thisP>=0.01) {
+      df[i,]$Sig<-"*" # give one star for P<0.05
+    }
+    else if (0.01>thisP && thisP>=0.001) {
+      df[i,]$Sig<-"**" # give two stars for P<0.01
+    }
+    else if (0.001>thisP) {
+      df[i,]$Sig<-"***" # give 3 stars for P<0.001
+    }
+  }
+  return(df)
+}
+
+####### Table 1 #######
+reml<-TRUE 
+method<-"holm" # set P-value adjustment method: "holm" for sequential Bonferroni, "BH" for false discovery rate
+
+# Use Shannon entropy estimate as response variable because residuals are terrible when using e^Shannon 
+stats.adiv.leaf3<-alphaLMMstats(leaf3.smd,resp="Shannon",reml=reml)
+stats.adiv.leaf3<-rbind(stats.adiv.leaf3,alphaLMMstats(leaf3.smd,resp="Chao1",reml=reml))
+stats.adiv.leaf3<-addstars(Pcorrect(stats.adiv.leaf3,method=method))
+
+stats.adiv.root3<-alphaLMMstats(root3.smd,resp="Shannon",reml=reml)
+stats.adiv.root3<-rbind(stats.adiv.root3,alphaLMMstats(root3.smd,resp="Chao1",reml=reml))
+stats.adiv.root3<-addstars(Pcorrect(stats.adiv.root3,method=method))
+
+Table1<-data.frame(row.names=levels(stats.adiv.leaf3$Term))
+Table1$Term<-rownames(Table1)
+for (h in 1:2){
+  organ<-c('leaf','root')[h]
+  stats<-get(c("stats.adiv.leaf3","stats.adiv.root3")[h])
+  for (i in 1:length(levels(stats.adiv.leaf3$Response))){
+    resp<-levels(stats$Response)[i]
+    for (j in 1:length(levels(stats$Term))){
+      term<-levels(stats$Term)[j]
+      subtable1<-subset(stats,Response==resp&Term==term)
+      teststat<-ifelse(term%in%c('Block','Line','Plate'),
+                       paste0("ChiSq",subtable1$df,"=",format(subtable1$F.or.ChiSq,digits=3)),
+                       paste0("F",subtable1$df,",",ceiling(subtable1$ddf),"=",format(subtable1$F.or.ChiSq,digits=3)))
+      p<-ifelse(subtable1$P_corrected==0,"P<3e-16",paste0("P=",format(subtable1$P_corrected,digits=2)))
+      Table1[term,paste0(organ,"__",resp)]<-paste0(teststat,";",p)
+    }
+  }
+}
+write.table(Table1,file="Table1.txt",sep='\t',row.names=FALSE,col.names=TRUE)
+####### Table 2 ########
+reml<-TRUE
+method<-"holm" # set P-value adjustment method: "holm" for sequential Bonferroni, "BH" for false discovery rate
+
+stats.wUF.leaf3<-betaLMMstats(leaf3.smd,resp="wUF1",reml=reml)
+stats.wUF.leaf3<-rbind(stats.wUF.leaf3,betaLMMstats(leaf3.smd,resp="wUF2",reml=reml))
+stats.wUF.leaf3<-rbind(stats.wUF.leaf3,betaLMMstats(leaf3.smd,resp="wUF3",reml=reml))
+stats.wUF.leaf3<-addstars(Pcorrect(stats.wUF.leaf3,method=method))
+
+stats.wUF.root3<-betaLMMstats(root3.smd,resp="wUF1",reml=reml)
+stats.wUF.root3<-rbind(stats.wUF.root3,betaLMMstats(root3.smd,resp="wUF2",reml=reml))
+stats.wUF.root3<-rbind(stats.wUF.root3,betaLMMstats(root3.smd,resp="wUF3",reml=reml))
+stats.wUF.root3<-addstars(Pcorrect(stats.wUF.root3,method=method))
+
+Table2<-data.frame(row.names=levels(stats.wUF.leaf3$Term))
+Table2$Term<-rownames(Table2)
+for (h in 1:2){
+  organ<-c('leaf','root')[h]
+  stats<-get(c("stats.wUF.leaf3","stats.wUF.root3")[h])
+  for (i in 1:length(levels(stats$Response))){
+    resp<-levels(stats$Response)[i]
+    for (j in 1:length(levels(stats$Term))){
+      term<-levels(stats$Term)[j]
+      subTable2<-subset(stats,Response==resp&Term==term)
+      teststat<-ifelse(term%in%c('Block','Line','Plate'),
+                       paste0("ChiSq",subTable2$df,"=",format(subTable2$F.or.ChiSq,digits=3)),
+                       paste0("F",subTable2$df,",",ceiling(subTable2$ddf),"=",format(subTable2$F.or.ChiSq,digits=3)))
+      p<-ifelse(subTable2$P_corrected==0,"P<3e-16",paste0("P=",format(subTable2$P_corrected,digits=2)))
+      Table2[term,paste0(organ,"__",resp)]<-paste0(teststat,";",p)
+    }
+  }
+}
+write.table(Table2,file="Table2.txt",sep='\t',row.names=FALSE,col.names=TRUE)
+
+####### Table S2 #######
+reml<-TRUE
+method<-"holm" # set P-value adjustment method: "holm" for sequential Bonferroni, "BH" for false discovery rate
+
+stats.uUF.leaf3<-betaLMMstats(leaf3.smd,resp="uUF1",reml=reml)
+stats.uUF.leaf3<-rbind(stats.uUF.leaf3,betaLMMstats(leaf3.smd,resp="uUF2",reml=reml))
+stats.uUF.leaf3<-rbind(stats.uUF.leaf3,betaLMMstats(leaf3.smd,resp="uUF3",reml=reml))
+stats.uUF.leaf3<-addstars(Pcorrect(stats.uUF.leaf3,method=method))
+
+stats.uUF.root3<-betaLMMstats(root3.smd,resp="uUF1",reml=reml)
+stats.uUF.root3<-rbind(stats.uUF.root3,betaLMMstats(root3.smd,resp="uUF2",reml=reml))
+stats.uUF.root3<-rbind(stats.uUF.root3,betaLMMstats(root3.smd,resp="uUF3",reml=reml))
+stats.uUF.root3<-addstars(Pcorrect(stats.uUF.root3,method=method))
+
+TableS2<-data.frame(row.names=levels(stats.uUF.leaf3$Term))
+TableS2$Term<-rownames(TableS2)
+for (h in 1:2){
+  organ<-c('leaf','root')[h]
+  stats<-get(c("stats.uUF.leaf3","stats.uUF.root3")[h])
+  for (i in 1:length(levels(stats$Response))){
+    resp<-levels(stats$Response)[i]
+    for (j in 1:length(levels(stats$Term))){
+      term<-levels(stats$Term)[j]
+      subTableS2<-subset(stats,Response==resp&Term==term)
+      teststat<-ifelse(term%in%c('Block','Line','Plate'),
+                       paste0("ChiSq",subTableS2$df,"=",format(subTableS2$F.or.ChiSq,digits=3)),
+                       paste0("F",subTableS2$df,",",ceiling(subTableS2$ddf),"=",format(subTableS2$F.or.ChiSq,digits=3)))
+      p<-ifelse(subTableS2$P_corrected==0,"P<3e-16",paste0("P=",format(subTableS2$P_corrected,digits=2)))
+      TableS2[term,paste0(organ,"__",resp)]<-paste0(teststat,";",p)
+    }
+  }
+}
+write.table(TableS2,file="TableS2.txt",sep='\t',row.names=FALSE,col.names=TRUE)
+
+####### Check residuals and R^2 for all alpha diversity models and save LS means for plotting ########
+# Use Shannon entropy estimate as response variable because residuals are terrible when using e^Shannon 
+leaf3.sha<-lmer(Shannon~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line)+(1|newPlate)+logObs,data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.sha)~fitted(leaf3.sha)) # looks fine
+LSM.sha.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.sha)[1])
+colnames(LSM.sha.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.sha) # 0.5455
+rm(leaf3.sha)
+
+leaf3.chao1<-lmer(Chao1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line)+(1|newPlate)+logObs,data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.chao1)~fitted(leaf3.chao1)) # looks OK
+LSM.chao1.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.chao1)[1])
+colnames(LSM.chao1.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.chao1) # 0.6380
+
+root3.sha<-lmer(Shannon~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line)+(1|newPlate)+logObs,data=root3.smd,REML=reml)
+plot(residuals(root3.sha)~fitted(root3.sha)) # looks fine
+LSM.sha.root3<-as.data.frame(lmerTest::lsmeans(root3.sha)[1])
+colnames(LSM.sha.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.sha) # 0.6973
+rm(root3.sha)
+
+root3.chao1<-lmer(Chao1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line)+(1|newPlate)+logObs,data=root3.smd,REML=reml)
+plot(residuals(root3.chao1)~fitted(root3.chao1)) # looks great
+LSM.chao1.root3<-as.data.frame(lmerTest::lsmeans(root3.chao1)[1])
+colnames(LSM.chao1.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.chao1) # 0.7426
+rm(root3.chao1)
+####### Check residuals and R^2 for all weighted UniFrac PCoA models and save LS means for plotting ########
+# weighted UniFrac PCo1: leaves
+leaf3.wUF1<-lmer(wUF1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.wUF1)~fitted(leaf3.wUF1)) # looks great
+LSM.wUF1.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.wUF1)[1])
+colnames(LSM.wUF1.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.wUF1) # 0.2761
+rm(leaf3.wUF1)
+# weighted UniFrac PCo1: roots
+root3.wUF1<-lmer(wUF1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.wUF1)~fitted(root3.wUF1)) # looks great
+LSM.wUF1.root3<-as.data.frame(lmerTest::lsmeans(root3.wUF1)[1])
+colnames(LSM.wUF1.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.wUF1) # 0.8366
+rm(root3.wUF1)
+# weighted UniFrac PCo2: leaves
+leaf3.wUF2<-lmer(wUF2~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.wUF2)~fitted(leaf3.wUF2)) # looks OK
+LSM.wUF2.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.wUF2)[1])
+colnames(LSM.wUF2.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.wUF2) # 0.5133
+rm(leaf3.wUF2)
+# weighted UniFrac PCo2: roots
+root3.wUF2<-lmer(wUF2~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.wUF2)~fitted(root3.wUF2)) # looks great
+LSM.wUF2.root3<-as.data.frame(lmerTest::lsmeans(root3.wUF2)[1])
+colnames(LSM.wUF2.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.wUF2) # 0.6444
+rm(root3.wUF2)
+# weighted UniFrac PCo3: leaves
+leaf3.wUF3<-lmer(wUF3~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.wUF3)~fitted(leaf3.wUF3)) # looks excellent
+LSM.wUF3.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.wUF3)[1])
+colnames(LSM.wUF3.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.wUF3) # 0.4388
+rm(leaf3.wUF3)
+# weighted UniFrac PCo3: leaves
+root3.wUF3<-lmer(wUF3~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.wUF3)~fitted(root3.wUF3)) # looks great
+LSM.wUF3.root3<-as.data.frame(lmerTest::lsmeans(root3.wUF3)[1])
+colnames(LSM.wUF3.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.wUF3) # 0.3363
+rm(root3.wUF3)
+####### Check residuals and R^2 for all unweighted UniFrac PCoA models  and save LS means for plotting #######
+# unweighted UniFrac PCo1: leaves
+leaf3.uUF1<-lmer(uUF1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.uUF1)~fitted(leaf3.uUF1)) # looks fine
+LSM.uUF1.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.uUF1)[1])
+colnames(LSM.uUF1.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.uUF1) # 0.6109
+rm(leaf3.uUF1)
+# unweighted UniFrac PCo1: roots
+root3.uUF1<-lmer(uUF1~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.uUF1)~fitted(root3.uUF1)) # looks fine
+LSM.uUF1.root3<-as.data.frame(lmerTest::lsmeans(root3.uUF1)[1])
+colnames(LSM.uUF1.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.uUF1) # 0.8900
+rm(root3.uUF1)
+# unweighted UniFrac PCo2: leaves
+leaf3.uUF2<-lmer(uUF2~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.uUF2)~fitted(leaf3.uUF2)) # looks great
+LSM.uUF2.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.uUF2)[1])
+colnames(LSM.uUF2.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.uUF2) # 0.2991
+rm(leaf3.uUF2)
+# unweighted UniFrac PCo2: roots
+root3.uUF2<-lmer(uUF2~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.uUF2)~fitted(root3.uUF2)) # looks great
+LSM.uUF2.root3<-as.data.frame(lmerTest::lsmeans(root3.uUF2)[1])
+colnames(LSM.uUF2.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.uUF2) # 0.8111
+rm(root3.uUF2)
+# unweighted UniFrac PCo3: leaves
+leaf3.uUF3<-lmer(uUF3~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=leaf3.smd,REML=reml)
+plot(residuals(leaf3.uUF3)~fitted(leaf3.uUF3)) # looks good
+LSM.uUF3.leaf3<-as.data.frame(lmerTest::lsmeans(leaf3.uUF3)[1])
+colnames(LSM.uUF3.leaf3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(leaf3.uUF3) # 0.5605
+rm(leaf3.uUF3)
+# unweighted UniFrac PCo3: roots
+root3.uUF3<-lmer(uUF3~Genotype*Site + Genotype*Age + Harvested + (1|Site:Block) + (1|Genotype:Line),data=root3.smd,REML=reml)
+plot(residuals(root3.uUF3)~fitted(root3.uUF3)) # looks perfect
+LSM.uUF3.root3<-as.data.frame(lmerTest::lsmeans(root3.uUF3)[1])
+colnames(LSM.uUF3.root3)<-c("Genotype","Site","Age","Harvested","Estimate","SE","DF","t","lowerCI","upperCI","P_uncorrected")
+r2.LMM(root3.uUF3) # 0.8439
+rm(root3.uUF3)
+####### Combine metadata of both tissues into one dataframe for plotting #######
+both.smd<-rbind(cbind(leaf3.smd,data.frame("Tissue"="leaf")),cbind(root3.smd,data.frame("Tissue"="root")))
+####### Fig. S6: alpha diversity ~ Year #######
+# Chao1 diversity
+pdf(file="plots/FigS6a.pdf",height=9)
+LSM.chao1.both<-rbind(cbind(LSM.chao1.leaf3,data.frame("Tissue"="leaf")),cbind(LSM.chao1.root3,data.frame("Tissue"="root")))
+ggplot(data=LSM.chao1.both[c(12,13,55,56),],aes(x=Harvested, y=Estimate,color=Harvested))+
+  facet_wrap(~Tissue,ncol=2,scales="free")+
+  geom_errorbar(size=2,aes(ymin=Estimate-SE, ymax=Estimate+SE), width=.1,position=position_dodge(width=0.3,height=0))+
+  geom_point(size=4,width=.1,position=position_dodge(width=0.3,height=0))+
+  ylab("LS mean Chao1 estimated richness\n")+xlab("\nYear harvested")+
+  scale_colour_manual(values=c("red","blue"),guide=FALSE)+
+  theme_classic()+
+  theme(axis.title.x=element_text(size=28,face="bold"),axis.text.x=element_text(size=24,face="bold"))+
+  theme(axis.title.y=element_text(size=28,face="bold"),axis.text.y=element_text(size=24,face="bold"))+
+  theme(strip.background = element_rect(fill="gray90",color="gray90"), strip.text=element_text(size=24,face="bold"))
+rm(LSM.chao1.both)
+dev.off()
+  
+# Shannon diversity
+pdf(file="plots/FigS6b.pdf",height=9)
+LSM.sha.both<-rbind(cbind(LSM.sha.leaf3,data.frame("Tissue"="leaf")),cbind(LSM.sha.root3,data.frame("Tissue"="root")))
+ggplot(data=LSM.sha.both[c(12,13,55,56),],aes(x=Harvested, y=Estimate,color=Harvested))+
+  facet_wrap(~Tissue,ncol=2,scales="free")+
+  geom_errorbar(size=3,aes(ymin=Estimate-SE, ymax=Estimate+SE), width=.1,position=position_dodge(width=0.3,height=0))+
+  geom_point(size=7,width=.1,position=position_dodge(width=0.3,height=0))+
+  ylab("LS mean Shannon effective diversity\n")+xlab("\nYear harvested")+
+  scale_colour_manual(values=c("red","blue"),guide=FALSE)+
+  scale_y_continuous(labels=function(y) format(exp(y),digits=3),breaks=c(log(35),log(45),log(55),log(430),log(460),log(490)))+ # convert from Shannon entropy to effective Shannon diversity
+  theme_classic()+
+  theme(axis.title.x=element_text(size=28,face="bold"),axis.text.x=element_text(size=24,face="bold"))+
+  theme(axis.title.y=element_text(size=28,face="bold"),axis.text.y=element_text(size=24,face="bold"))+
+  theme(strip.background = element_rect(fill="gray90",color="gray90"), strip.text=element_text(size=24,face="bold"))
+rm(LSM.sha.both)
+dev.off()
+####### Boxplots: Alpha diversity by Site #######
+update_geom_defaults("point", list(colour = NULL))
+pdf(file="plots/Fig3a.pdf",width=15,height=9)
+multiplot(ggplot(data = both.smd,aes(x=Tissue,y=Chao1,colour=Site))+
+            geom_boxplot(size=1.5,outlier.colour=NULL,position=position_dodge(w=0.9),outlier.size=3)+
+            ylab("Chao1 estimated richness\n")+
+            scale_color_manual(values=sitePalette)+
+            theme_classic()+
+            theme(axis.text.x = element_text(size=36,face="bold"))+
+            theme(axis.title.x = element_blank(),axis.title.y=element_text(size=40,face="bold"))+
+            theme(legend.title= element_text(size=40),legend.text=element_text(size=36,face="bold"))+
+            theme(axis.text.y=element_text(size=32,face="bold"),legend.position=c(0.8,0.2))+
+            theme(legend.background = element_rect(fill="gray95", size=.5))+
+            theme(legend.key.height=unit(3,"line"),legend.key.width=unit(3,"line")),
+          ggplot(data = both.smd,aes(x=Tissue,y=expShannon,colour=Site))+
+            geom_boxplot(size=1.5,outlier.colour=NULL,position=position_dodge(w=0.9),outlier.size=3)+
+            ylab("Shannon effective diversity\n")+
+            scale_color_manual(values=sitePalette,guide=FALSE)+
+            theme_classic()+
+            theme(axis.text.x = element_text(size=36,face="bold"))+
+            theme(axis.title.x = element_blank(),axis.title.y=element_text(size=40,face="bold"))+
+            theme(axis.text.y=element_text(size=32,face="bold")),
+          cols=2)
+dev.off()
+update_geom_defaults("point", list(colour = "black"))
+
+
+####### Combine LS means for wUF1 and wUF2 into single data frame #######
+LSM.wUF12.leaf3<-merge(rename(LSM.wUF1.leaf3,c("Estimate"="wUF1","SE"="SE.wUF1")),
+                       rename(LSM.wUF2.leaf3,c("Estimate"="wUF2","SE"="SE.wUF2")),
+                       by="row.names",suffixes=c("",".y"))
+LSM.wUF12.root3<-merge(rename(LSM.wUF1.root3,c("Estimate"="wUF1","SE"="SE.wUF1")),
+                       rename(LSM.wUF2.root3,c("Estimate"="wUF2","SE"="SE.wUF2")),
+                       by="row.names",suffixes=c("",".y"))
+LSM.uUF12.leaf3<-merge(rename(LSM.uUF1.leaf3,c("Estimate"="uUF1","SE"="SE.uUF1")),
+                       rename(LSM.uUF2.leaf3,c("Estimate"="uUF2","SE"="SE.uUF2")),
+                       by="row.names",suffixes=c("",".y"))
+LSM.uUF12.root3<-merge(rename(LSM.uUF1.root3,c("Estimate"="uUF1","SE"="SE.uUF1")),
+                       rename(LSM.uUF2.root3,c("Estimate"="uUF2","SE"="SE.uUF2")),
+                       by="row.names",suffixes=c("",".y"))
+####### Fig. S9: unweighted UniFrac LSM ordination ~ Genotype #######
+pdf(file="plots/FigS9a.pdf",width=9,height=9)
+ggplot(LSM.uUF12.leaf3[4:8,],aes(x=uUF1,y=uUF2,color=Genotype))+
+  geom_point(size=5)+
+  geom_errorbar(aes(ymin=uUF2-SE.uUF2,ymax=uUF2+SE.uUF2),width=0.002,size=2)+
+  geom_errorbarh(aes(xmin=uUF1-SE.uUF1,xmax=uUF1+SE.uUF1),height=0.002,size=2)+
+  scale_color_manual(values=popPalette,name="Genotype:   ")+
+  ylab("PCo2 [9.4%]")+
+  xlab("PCo1 [21.7%]")+
+  ggtitle("Leaves")+theme_classic()+
+  theme(plot.title = element_text(size=26, face="bold"))+
+  theme(axis.title.x=element_text(size=24,face="bold"),axis.text.x=element_text(size=22,face="bold"))+
+  theme(axis.title.y=element_text(size=24,face="bold"),axis.text.y=element_text(size=22,face="bold"))+
+  theme(legend.title= element_text(size=24),legend.text=element_text(size=22))+
+  theme(legend.key.height=unit(1.5,"lines"),legend.key.width=unit(1.5,"lines"))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position="top")+
+  theme(axis.ticks=element_blank(),panel.grid.minor=element_blank())
+dev.off()
+
+pdf(file="plots/FigS9b.pdf",width=9,height=9)
+ggplot(LSM.uUF12.root3[4:8,],aes(x=uUF1,y=uUF2,color=Genotype))+
+  geom_point(size=5)+
+  geom_errorbar(aes(ymin=uUF2-SE.uUF2,ymax=uUF2+SE.uUF2),width=0.002,size=2)+
+  geom_errorbarh(aes(xmin=uUF1-SE.uUF1,xmax=uUF1+SE.uUF1),height=0.002,size=2)+
+  scale_color_manual(values=popPalette,name="Genotype:   ")+
+  ylab("PCo2 [9.5%]")+
+  xlab("PCo1 [29.6%]")+
+  ggtitle("Roots")+theme_classic()+
+  theme(plot.title = element_text(size=26, face="bold"))+
+  theme(axis.title.x=element_text(size=24,face="bold"),axis.text.x=element_text(size=22,face="bold"))+
+  theme(axis.title.y=element_text(size=24,face="bold"),axis.text.y=element_text(size=22,face="bold"))+
+  theme(legend.title= element_text(size=24),legend.text=element_text(size=22))+
+  theme(legend.key.height=unit(1.5,"lines"),legend.key.width=unit(1.5,"lines"))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position="top")+
+  theme(axis.ticks=element_blank(),panel.grid.minor=element_blank())
+dev.off()
+####### Fig. 5c: weighted UniFrac LSM ordination ~ Genotype #######
+pdf(file="plots/Fig5c.pdf",width=15,height=10)
+multiplot(ggplot(LSM.wUF12.leaf3[4:8,],aes(x=wUF1,y=wUF2,color=Genotype))+
+            geom_point(size=5)+
+            geom_errorbar(aes(ymin=wUF2-SE.wUF2,ymax=wUF2+SE.wUF2),width=0.002,size=2)+
+            geom_errorbarh(aes(xmin=wUF1-SE.wUF1,xmax=wUF1+SE.wUF1),height=0.002,size=2)+
+            scale_color_manual(values=popPalette)+
+            ylab("PCo2 [17.2%]")+xlab("PCo1 [45.1%]")+
+            ggtitle("Leaves\n")+theme_classic()+xlim(c(-0.03,0.03))+
+            theme(plot.title = element_text(size=40, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=27,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=27,face="bold"))+
+            theme(legend.title= element_text(size=32),legend.text=element_text(size=28,face="bold"))+
+            theme(legend.key.height=unit(2,"lines"),legend.key.width=unit(2.5,"lines"),legend.position=c(0.85,.85))+
+            theme(legend.background = element_rect(fill="gray90", size=.5)),
+          ggplot(LSM.wUF12.root3[4:8,],aes(x=wUF1,y=wUF2,color=Genotype))+
+            geom_point(size=5)+
+            geom_errorbar(aes(ymin=wUF2-SE.wUF2,ymax=wUF2+SE.wUF2),width=0.002,size=2)+
+            geom_errorbarh(aes(xmin=wUF1-SE.wUF1,xmax=wUF1+SE.wUF1),height=0.002,size=2)+
+            scale_color_manual(values=popPalette,guide=FALSE)+
+            ylab("PCo2 [14.6%]")+
+            xlab("PCo1 [32.2%]")+
+            ggtitle("Roots")+theme_classic()+
+            theme(plot.title = element_text(size=40, face="bold"))+
+            theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=27,face="bold"))+
+            theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=27,face="bold")),
+          cols=2)
+dev.off()
+
+pdf(file="plots/Fig5c_leaf.pdf",width=9,height=9)
+ggplot(LSM.wUF12.leaf3[4:8,],aes(x=wUF1,y=wUF2,color=Genotype))+
+  geom_point(size=5)+
+  geom_errorbar(aes(ymin=wUF2-SE.wUF2,ymax=wUF2+SE.wUF2),width=0.002,size=2)+
+  geom_errorbarh(aes(xmin=wUF1-SE.wUF1,xmax=wUF1+SE.wUF1),height=0.002,size=2)+
+  scale_color_manual(values=popPalette)+
+  ylab("PCo2 [17.2%]")+xlab("PCo1 [45.1%]")+
+  ggtitle("Leaves\n")+theme_classic()+
+  theme(plot.title = element_text(size=40, face="bold"))+
+  theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=32,face="bold"))+
+  theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=32,face="bold"))+
+  theme(legend.title= element_text(size=34),legend.text=element_text(size=30,face="bold"))+
+  theme(legend.key.height=unit(2,"lines"),legend.key.width=unit(2.5,"lines"),legend.position=c(0.9,.85))+
+  theme(legend.background = element_rect(fill="gray90", size=.5))
+dev.off()
+pdf(file="plots/Fig5c_root.pdf",width=9,height=9)
+ggplot(LSM.wUF12.root3[4:8,],aes(x=wUF1,y=wUF2,color=Genotype))+
+  geom_point(size=5)+
+  geom_errorbar(aes(ymin=wUF2-SE.wUF2,ymax=wUF2+SE.wUF2),width=0.002,size=2)+
+  geom_errorbarh(aes(xmin=wUF1-SE.wUF1,xmax=wUF1+SE.wUF1),height=0.002,size=2)+
+  scale_color_manual(values=popPalette,guide=FALSE)+
+  ylab("PCo2 [14.6%]")+
+  xlab("PCo1 [32.2%]")+
+  ggtitle("Roots")+theme_classic()+
+  theme(plot.title = element_text(size=26, face="bold"))+
+  theme(axis.title.x=element_text(size=24,face="bold"),axis.text.x=element_text(size=22,face="bold"))+
+  theme(axis.title.y=element_text(size=24,face="bold"),axis.text.y=element_text(size=22,face="bold"))
+dev.off()
+
+####### Fig. 6b: weighted UniFrac LSM ordination ~ Genotype x Site #######
+pdf(file="plots/Fig6b.pdf",width=9,height=9)
+ggplot(LSM.wUF12.leaf3[24:38,],aes(x=wUF1,y=wUF2,color=Genotype))+
+  facet_grid(.~Site,labeller=function(var,value){return(paste0("\nSite:  ",value,"\n"))})+
+  scale_x_continuous(breaks=c(-0.04,0,0.04))+
+  geom_point(size=4)+
+  geom_errorbar(aes(ymin=wUF2-SE.wUF2,ymax=wUF2+SE.wUF2),width=0.002,size=2.5)+
+  geom_errorbarh(aes(xmin=wUF1-SE.wUF1,xmax=wUF1+SE.wUF1),height=0.002,size=2.5)+
+  scale_color_manual(values=popPalette)+
+  ylab("PCo2 [17.2%]")+xlab("\nPCo1 [45.1%]")+
+  theme_classic()+
+  theme(strip.text.x=element_text(size=32,face="bold",lineheight=0.3),strip.background=element_rect(fill="gray90"))+
+  theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=30,vjust=0.8,hjust=0.9,angle=45,face="bold"))+
+  theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=30,face="bold"))+
+  theme(legend.title= element_text(size=36),legend.text=element_text(size=32,face="bold"))+
+  theme(panel.margin=unit(1.5,"lines"))+
+  theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2.5,"lines"))+
+  theme(legend.background = element_rect(fill="gray90", size=.5),legend.position=c(0.85,0.3))
+dev.off()
+####### Fig. 5a: LSM Chao1 ~ Genotype #######
+pdf(file="plots/Fig5a.pdf",height=9,width=15)
+LSM.chao1.both.Genotype<-rbind(cbind(LSM.chao1.leaf3[c(1:5),],data.frame("Organ"="leaf")),
+                      cbind(LSM.chao1.root3[c(1:5),],data.frame("Organ"="root")))
+ggplot(data=LSM.chao1.both.Genotype,aes(x=Genotype,y=Estimate,color=Genotype))+
+  facet_wrap(~Organ,scales="free")+
+  geom_errorbar(size=2,aes(ymin=Estimate-SE, ymax=Estimate+SE), width=.1,position=position_dodge(width=0.3,height=0))+
+  geom_point(size=4,width=.1,position=position_dodge(width=0.3,height=0))+
+  ylab("Chao1 estimated richness\n")+xlab("\nGenotype")+
+  scale_colour_manual(values=popPalette,guide=FALSE)+
+  theme_classic()+theme(panel.margin=unit(2,"lines"))+
+  theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=28,face="bold"))+
+  theme(axis.title.y=element_text(size=36,face="bold"),axis.text.y=element_text(size=28,face="bold"))+
+  theme(strip.background=element_rect(fill="gray90",color="gray90"),strip.text=element_text(size=36,face="bold"))
+rm(LSM.chao1.both.Genotype)
+dev.off()
+####### Fig. S8: LSM Shannon ~ Genotype #######
+pdf(file="plots/FigS8.pdf",height=5,width=11)
+LSM.sha.both<-rbind(cbind(LSM.sha.leaf3,data.frame("Tissue"="leaf")),cbind(LSM.sha.root3,data.frame("Tissue"="root")))
+ggplot(data=LSM.sha.both[c(1:5,44:48),],aes(x=Genotype,y=exp(Estimate),color=Genotype))+
+  facet_wrap(~Tissue,ncol=2,scales="free")+
+  geom_errorbar(size=3, aes(ymin=exp(Estimate-SE), ymax=exp(Estimate+SE)), width=.1,position=position_dodge(width=0.3,height=0))+
+  geom_point(size=6,width=.1,position=position_dodge(width=0.3,height=0))+
+  ylab("LS mean Shannon\neffective diversity\n")+xlab("\nGenotype")+
+  scale_colour_manual(values=popPalette,guide=FALSE)+
+  theme_classic()+
+  theme(strip.text.x=element_text(size=28,face="bold"),strip.background=element_rect(color="gray90",fill="gray90"))+
+  theme(axis.title.x=element_text(size=28,face="bold"),axis.text.x=element_text(size=23,face="bold"))+
+  theme(axis.title.y=element_text(size=26,face="bold"),axis.text.y=element_text(size=25,face="bold"))
+rm(LSM.sha.both)
+dev.off()
+####### Fig. 7a: LSM Chao1 ~ Age #######
+# Chao1 diversity: both tissues
+pdf(file="plots/Fig7a.pdf",height=9,width=15)
+LSM.chao1.both<-rbind(cbind(LSM.chao1.leaf3,data.frame("Tissue"="leaf")),cbind(LSM.chao1.root3,data.frame("Tissue"="root")))
+ggplot(data=LSM.chao1.both[c(9:11,52:54),],aes(x=Age,y=Estimate,color=Age))+
+  facet_wrap(~Tissue,scales="free")+
+  geom_errorbar(size=3,aes(ymin=Estimate-SE, ymax=Estimate+SE), width=.05,position=position_dodge(width=0.3,height=0))+
+  geom_point(size=7,width=.1,position=position_dodge(width=0.3,height=0))+
+  ylab("Chao1 estimated richness\n")+xlab("Plant age (years)")+
+  scale_colour_manual(values=agePalette,guide=FALSE)+
+  theme(panel.margin = unit(1.5, "lines"))+
+  theme_classic()+guides(color=FALSE)+
+  theme(panel.margin=unit(2,"lines"))+
+  theme(axis.title.x=element_text(size=38,face="bold"),axis.text.x=element_text(size=36,face="bold"))+
+  theme(axis.title.y=element_text(size=38,face="bold",lineheight=0.8),axis.text.y=element_text(size=34,face="bold"))+
+  theme(strip.text.x=element_text(size=38,face="bold"),strip.background=element_rect(fill="gray90"))
+rm(LSM.chao1.both)
+dev.off()
+####### LSM plots: Alpha diversity by Genotype x Age #######
+# Chao1 diversity: roots
+pdf(file="plots/Fig7d.pdf",width=9,height=9)
+ggplot(data=LSM.chao1.root3[c(29:43),],aes(x=Genotype,y=Estimate,color=Age))+
+  geom_errorbar(size=3,aes(ymin=Estimate-SE, ymax=Estimate+SE), width=.1,position=position_dodge(width=0.5,height=0))+
+  geom_point(size=7,width=0,position=position_dodge(width=0.5,height=0))+
+  ylab("Chao1 estimated richness\n")+
+  scale_colour_manual(values=agePalette,name="Plant age\n(years):   ")+
+  theme(panel.margin = unit(1.5, "lines"))+
+  theme_classic()+theme(legend.direction='horizontal')+
+  theme(legend.position=c(0.4,0.1),legend.background=element_rect(fill="gray95"))+
+  theme(legend.key.height=unit(2,"lines"),legend.key.width=unit(2,"lines"))+
+  theme(legend.title=element_text(size=34,face="bold"),legend.text=element_text(size=34,face="bold"))+
+  theme(axis.title.x=element_text(size=36,face="bold"),axis.text.x=element_text(size=32,face="bold"))+
+  theme(axis.title.y=element_text(size=36,face="bold",lineheight=0.8),axis.text.y=element_text(size=30,face="bold"))
+dev.off()
+
+# ------- *** Next: Linear mixed models of individual taxa *** -------
+
+####### Fig. S1: OTU count distributions #######
+# prune taxa with no observations: (i.e., remove OTUs that don't exist in each dataset)
+leaf3<-prune_taxa(taxa_sums(leaf3)>0,leaf3); ntaxa(leaf3) # 3631 of 3719 OTUs remain
+root3<-prune_taxa(taxa_sums(root3)>0,root3); ntaxa(root3) # 3707 of 3719 remain
+
+# histograms & stats of OTU counts
+pdf(file="plots/FigS1.pdf",width=9,height=6)
+ggplot(rbind(data.frame("Observations"=taxa_sums(leaf3),"Tissue"="leaf"),
+             data.frame("Observations"=taxa_sums(root3),"Tissue"="root")),
+       aes(x=log(Observations),colour=Tissue,fill=Tissue))+
+  scale_fill_manual(values=c("forest green","dark grey"))+
+  scale_color_manual(values=c("forest green","dark grey"))+
+  scale_x_continuous(labels=function(x) format(exp(x),digits=4),breaks=c(log(1),log(10),log(100),log(1000),log(10000),log(100000),log(1000000)))+
+  ylab("Density")+xlab("Reads")+
+  geom_density(alpha=0.3)+
+  theme_classic()+
+  theme(legend.title=element_blank(),legend.text=element_text(size=28,face="bold"),legend.position=c(0.9,0.8))+
+  theme(axis.title.y=element_text(size=29,face="bold"),axis.text.y=element_text(size=26,face="bold"))+
+  theme(axis.title.x=element_text(size=29,face="bold"),axis.text.x=element_text(size=26,face="bold"))
+dev.off()
+
+####### Reduce OTU tables to include only OTUs with abundances >10% of mean ("common" OTUs) #######
+# Leaves: extract "non-rare" OTUs (count totals >10% of mean)
+sum(sort(taxa_sums(leaf3),decreasing=TRUE)[1])/sum(taxa_sums(leaf3)) # OTU_3 (Sphingomonas sp.) alone accounts for 36.04% of all observations
+median(sort(taxa_sums(leaf3),decreasing=TRUE)) # 46
+mean(taxa_sums(leaf3)) # 1687.594
+mean(sort(taxa_sums(leaf3),decreasing=TRUE)[-1]) # without OTU_3, mean= 1079.67 
+
+com.leaf<-rownames(subset(data.frame("Count"=taxa_sums(leaf3)),Count>0.1*mean(taxa_sums(leaf3)))) # store "common" OTU_IDs: contains 1026 leaf OTUs
+sort(taxa_sums(prune_taxa(com.leaf,leaf3))/sum(taxa_sums(leaf3)), decreasing=TRUE) # relative abundance (in entire dataset) ranges from 0.0000276 to 0.3604
+sum(taxa_sums(prune_taxa(com.leaf,leaf3)))/sum(taxa_sums(leaf3)) # common set represents 98.35% of all observations
+
+# Roots: extract "non-rare" OTUs (count totals >10% of mean)
+sum(sort(taxa_sums(root3),decreasing=TRUE)[1])/sum(taxa_sums(root3)) # most abundant OTU accounts for 4.93% of all observations
+median(sort(taxa_sums(root3),decreasing=TRUE)) # 774
+mean(taxa_sums(root3)) # 3087.38
+
+com.root<-rownames(subset(data.frame("Count"=taxa_sums(root3)),Count>0.1*mean(taxa_sums(root3)))) # store "common" OTU_IDs: contains 2687 root OTUs
+sort(taxa_sums(prune_taxa(com.root,root3))/sum(taxa_sums(root3)), decreasing=TRUE) # relative abundance (in entire dataset) ranges from 0.000027 to 0.0493
+sum(taxa_sums(prune_taxa(com.root,root3)))/sum(taxa_sums(root3)) # root common set represents 98.8% of all observations
+
+### Prune OTU tables to 'non rare' OTUs only
+leaf3.common<-prune_taxa(com.leaf,leaf3); ntaxa(leaf3.common) # 1026 remain
+root3.common<-prune_taxa(com.root,root3); ntaxa(root3.common) # 2687 remain
+leaf3.common.rlog<-prune_taxa(com.leaf,leaf3.rlog)
+root3.common.rlog<-prune_taxa(com.root,root3.rlog)
+####### Combine normalized OTU counts with sample metadata #######
+## Make data frames with sample metadata in first 33 columns, then common OTU counts in remaining columns
+df.common.rlog.leaf3<-as.data.frame(t(as(otu_table(leaf3.common.rlog),"matrix"))) # extract common OTU table into a data frame
+df.common.rlog.leaf3<-merge(leaf3.smd[,1:33],df.common.rlog.leaf3,by.y="row.names",by.x="SampleID") # combine OTU table with sample metadata
+df.common.rlog.root3<-as.data.frame(t(as(otu_table(root3.common.rlog),"matrix"))) # extract common OTU table into a data frame
+df.common.rlog.root3<-merge(root3.smd[,1:33],df.common.rlog.root3,by.y="row.names",by.x="SampleID") # combine OTU table with sample metadata
+####### Create subdirectory for each taxonomic level ####### 
+dir.create('./otu')
+dir.create('./fam')
+dir.create('./cla')
+dir.create('./ord')
+dir.create('./phy')
+####### Fill OTU subdirectory #######
+## Save master data frames
+saveRDS(df.common.rlog.leaf3,file="./otu/df_leaf_common_rlog.rds")
+saveRDS(df.common.rlog.root3,file="./otu/df_root_common_rlog.rds")
+save(leaf3.common.rlog,file="./otu/phyloseq_leaf_otu_common_rlog.RData")
+save(root3.common.rlog,file="./otu/phyloseq_root_otu_common_rlog.RData")
+rm(leaf3.common.rlog,root3.common.rlog)
+####### Fill Fam subdirectory #######
+## Glom by Family, starting with RAW counts of "COMMON" OTUs and then apply relative log normalization
+leaf3.common.fam<-tax_glom(leaf3.common,taxrank="Family")
+taxa_names(leaf3.common.fam)<-as.data.frame(tax_table(leaf3.common.fam))$Family  # update taxa names
+root3.common.fam<-tax_glom(root3.common,taxrank="Family")
+taxa_names(root3.common.fam)<-as.data.frame(tax_table(root3.common.fam))$Family  # update taxa names
+
+## Apply regularized log normalization
+leaf3.common.fam.rlog<-leaf3.common.fam # copy Phyloseq object
+leaf3.fam.dds<-phyloseq_to_deseq2(leaf3.common.fam,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+leaf3.fam.dds = estimateSizeFactors(leaf3.fam.dds, geoMeans = apply(counts(leaf3.fam.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+leaf3.fam.rld <- DESeq2::rlog(leaf3.fam.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+leaf3.fam.rlogMat <- GenomicRanges::assay(leaf3.fam.rld) # Extract transformed OTU table
+otu_table(leaf3.common.fam.rlog) <- otu_table(leaf3.fam.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(leaf3.fam.dds,leaf3.fam.rld,leaf3.fam.rlogMat) # Clean up
+
+root3.common.fam.rlog<-root3.common.fam # copy Phyloseq object
+root3.fam.dds<-phyloseq_to_deseq2(root3.common.fam,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+root3.fam.dds = estimateSizeFactors(root3.fam.dds, geoMeans = apply(counts(root3.fam.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+root3.fam.rld <- DESeq2::rlog(root3.fam.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+root3.fam.rlogMat <- GenomicRanges::assay(root3.fam.rld) # Extract transformed OTU table
+otu_table(root3.common.fam.rlog) <- otu_table(root3.fam.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(root3.fam.dds,root3.fam.rld,root3.fam.rlogMat) # Clean up
+
+## Make data frames with sample metadata in first 33 columns, then common Family counts in remaining columns
+df.leaf.common.fam.rlog<-as.data.frame(t(as(otu_table(leaf3.common.fam.rlog),"matrix"))) # extract common fam table into a data frame
+df.leaf.common.fam.rlog<-merge(leaf3.smd[1:33],df.leaf.common.fam.rlog,by.y="row.names",by.x="SampleID") # combine fam table with sample metadata
+
+df.root.common.fam.rlog<-as.data.frame(t(as(otu_table(root3.common.fam.rlog),"matrix"))) # extract common fam table into a data frame
+df.root.common.fam.rlog<-merge(root3.smd[1:33],df.root.common.fam.rlog,by.y="row.names",by.x="SampleID") # combine fam table with sample metadata
+
+saveRDS(df.leaf.common.fam.rlog,file="./fam/df_leaf_common_rlog.rds")
+saveRDS(df.root.common.fam.rlog,file="./fam/df_root_common_rlog.rds")
+save(leaf3.common.fam.rlog,file="./fam/phyloseq_leaf_common_rlog.RData")
+save(root3.common.fam.rlog,file="./fam/phyloseq_root_common_rlog.RData")
+rm(leaf3.common.fam.rlog,root3.common.fam.rlog)
+####### Fill ord subdirectory #######
+## Glom by Order, starting with RAW counts of "COMMON" OTUs and then apply relative log normalization
+leaf3.common.ord<-tax_glom(leaf3.common,taxrank="Order")
+taxa_names(leaf3.common.ord)<-as.data.frame(tax_table(leaf3.common.ord))$Order  # update taxa names
+root3.common.ord<-tax_glom(root3.common,taxrank="Order")
+taxa_names(root3.common.ord)<-as.data.frame(tax_table(root3.common.ord))$Order  # update taxa names
+
+## Apply regularized log normalization
+leaf3.common.ord.rlog<-leaf3.common.ord # copy Phyloseq object
+leaf3.ord.dds<-phyloseq_to_deseq2(leaf3.common.ord,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+leaf3.ord.dds = estimateSizeFactors(leaf3.ord.dds, geoMeans = apply(counts(leaf3.ord.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+leaf3.ord.rld <- DESeq2::rlog(leaf3.ord.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+leaf3.ord.rlogMat <- GenomicRanges::assay(leaf3.ord.rld) # Extract transformed OTU table
+otu_table(leaf3.common.ord.rlog) <- otu_table(leaf3.ord.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(leaf3.ord.dds,leaf3.ord.rld,leaf3.ord.rlogMat) # Clean up
+
+root3.common.ord.rlog<-root3.common.ord # copy Phyloseq object
+root3.ord.dds<-phyloseq_to_deseq2(root3.common.ord,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+root3.ord.dds = estimateSizeFactors(root3.ord.dds, geoMeans = apply(counts(root3.ord.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+root3.ord.rld <- DESeq2::rlog(root3.ord.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+root3.ord.rlogMat <- GenomicRanges::assay(root3.ord.rld) # Extract transformed OTU table
+otu_table(root3.common.ord.rlog) <- otu_table(root3.ord.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(root3.ord.dds,root3.ord.rld,root3.ord.rlogMat) # Clean up
+
+## Make data frames with sample metadata in first 33 columns, then common Order counts in remaining columns
+df.leaf.common.ord.rlog<-as.data.frame(t(as(otu_table(leaf3.common.ord.rlog),"matrix"))) # extract common ord table into a data frame
+df.leaf.common.ord.rlog<-merge(leaf3.smd[1:33],df.leaf.common.ord.rlog,by.y="row.names",by.x="SampleID") # combine ord table with sample metadata
+
+df.root.common.ord.rlog<-as.data.frame(t(as(otu_table(root3.common.ord.rlog),"matrix"))) # extract common ord table into a data frame
+df.root.common.ord.rlog<-merge(root3.smd[1:33],df.root.common.ord.rlog,by.y="row.names",by.x="SampleID") # combine ord table with sample metadata
+
+saveRDS(df.leaf.common.ord.rlog,file="./ord/df_leaf_common_rlog.rds")
+saveRDS(df.root.common.ord.rlog,file="./ord/df_root_common_rlog.rds")
+save(leaf3.common.ord.rlog,file="./ord/phyloseq_leaf_ord_common_rlog.RData")
+save(root3.common.ord.rlog,file="./ord/phyloseq_root_ord_common_rlog.RData")
+rm(leaf3.common.ord.rlog,root3.common.ord.rlog)
+####### Fill cla subdirectory #######
+## Glom by Class, starting with RAW counts of "COMMON" OTUs and then apply relative log normalization
+leaf3.common.cla<-tax_glom(leaf3.common,taxrank="Class")
+taxa_names(leaf3.common.cla)<-as.data.frame(tax_table(leaf3.common.cla))$Class  # update taxa names
+root3.common.cla<-tax_glom(root3.common,taxrank="Class")
+taxa_names(root3.common.cla)<-as.data.frame(tax_table(root3.common.cla))$Class  # update taxa names
+
+## Apply regularized log normalization
+leaf3.common.cla.rlog<-leaf3.common.cla # copy Phyloseq object
+leaf3.cla.dds<-phyloseq_to_deseq2(leaf3.common.cla,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+leaf3.cla.dds = estimateSizeFactors(leaf3.cla.dds, geoMeans = apply(counts(leaf3.cla.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+leaf3.cla.rld <- DESeq2::rlog(leaf3.cla.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+leaf3.cla.rlogMat <- GenomicRanges::assay(leaf3.cla.rld) # Extract transformed OTU table
+otu_table(leaf3.common.cla.rlog) <- otu_table(leaf3.cla.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(leaf3.cla.dds,leaf3.cla.rld,leaf3.cla.rlogMat) # Clean up
+
+root3.common.cla.rlog<-root3.common.cla # copy Phyloseq object
+root3.cla.dds<-phyloseq_to_deseq2(root3.common.cla,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+root3.cla.dds = estimateSizeFactors(root3.cla.dds, geoMeans = apply(counts(root3.cla.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+root3.cla.rld <- DESeq2::rlog(root3.cla.dds, blind = FALSE, fast = TRUE) # Apply regularized log transformation
+root3.cla.rlogMat <- GenomicRanges::assay(root3.cla.rld) # Extract transformed OTU table
+otu_table(root3.common.cla.rlog) <- otu_table(root3.cla.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(root3.cla.dds,root3.cla.rld,root3.cla.rlogMat) # Clean up
+
+## Make data frames with sample metadata in first 33 columns, then common Class counts in remaining columns
+df.leaf.common.cla.rlog<-as.data.frame(t(as(otu_table(leaf3.common.cla.rlog),"matrix"))) # extract common cla table into a data frame
+df.leaf.common.cla.rlog<-merge(leaf3.smd[1:33],df.leaf.common.cla.rlog,by.y="row.names",by.x="SampleID") # combine cla table with sample metadata
+
+df.root.common.cla.rlog<-as.data.frame(t(as(otu_table(root3.common.cla.rlog),"matrix"))) # extract common cla table into a data frame
+df.root.common.cla.rlog<-merge(root3.smd[1:33],df.root.common.cla.rlog,by.y="row.names",by.x="SampleID") # combine cla table with sample metadata
+
+saveRDS(df.leaf.common.cla.rlog,file="./cla/df_leaf_common_rlog.rds")
+saveRDS(df.root.common.cla.rlog,file="./cla/df_root_common_rlog.rds")
+save(leaf3.common.cla.rlog,file="./cla/phyloseq_leaf_cla_common_rlog.RData")
+save(root3.common.cla.rlog,file="./cla/phyloseq_root_cla_common_rlog.RData")
+rm(leaf3.common.cla.rlog,root3.common.cla.rlog)
+####### Fill phy subdirectory #######
+## Glom by Phylum, starting with RAW counts of "COMMON" OTUs and then apply relative log normalization
+leaf3.common.phy<-tax_glom(leaf3.common,taxrank="Phylum")
+taxa_names(leaf3.common.phy)<-as.data.frame(tax_table(leaf3.common.phy))$Phylum  # update taxa names
+root3.common.phy<-tax_glom(root3.common,taxrank="Phylum")
+taxa_names(root3.common.phy)<-as.data.frame(tax_table(root3.common.phy))$Phylum  # update taxa names
+
+## Apply regularized log normalization
+leaf3.common.phy.rlog<-leaf3.common.phy # copy Phyloseq object
+leaf3.phy.dds<-phyloseq_to_deseq2(leaf3.common.phy,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+leaf3.phy.dds = estimateSizeFactors(leaf3.phy.dds, geoMeans = apply(counts(leaf3.phy.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+leaf3.phy.rld <- DESeq2::rlog(leaf3.phy.dds, blind = FALSE, fast = FALSE) # Apply regularized log transformation
+leaf3.phy.rlogMat <- GenomicRanges::assay(leaf3.phy.rld) # Extract transformed OTU table
+otu_table(leaf3.common.phy.rlog) <- otu_table(leaf3.phy.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(leaf3.phy.dds,leaf3.phy.rld,leaf3.phy.rlogMat) # Clean up
+
+root3.common.phy.rlog<-root3.common.phy # copy Phyloseq object
+root3.phy.dds<-phyloseq_to_deseq2(root3.common.phy,~Site+Genotype+Site:Genotype+Age+Age:Genotype+Harvested) # Change to DESeq2 object
+root3.phy.dds = estimateSizeFactors(root3.phy.dds, geoMeans = apply(counts(root3.phy.dds), 1, gm_mean)) # Estimate size factors using geometric means 
+root3.phy.rld <- DESeq2::rlog(root3.phy.dds, blind = FALSE, fast = FALSE) # Apply regularized log transformation
+root3.phy.rlogMat <- GenomicRanges::assay(root3.phy.rld) # Extract transformed OTU table
+otu_table(root3.common.phy.rlog) <- otu_table(root3.phy.rlogMat, taxa_are_rows = TRUE) # Put transformed OTU table back into Phyloseq object
+rm(root3.phy.dds,root3.phy.rld,root3.phy.rlogMat) # Clean up
+
+## Make data frames with sample metadata in first 33 columns, then common Phylum counts in remaining columns
+df.leaf.common.phy.rlog<-as.data.frame(t(as(otu_table(leaf3.common.phy.rlog),"matrix"))) # extract common phy table into a data frame
+df.leaf.common.phy.rlog<-merge(leaf3.smd[1:33],df.leaf.common.phy.rlog,by.y="row.names",by.x="SampleID") # combine phy table with sample metadata
+
+df.root.common.phy.rlog<-as.data.frame(t(as(otu_table(root3.common.phy.rlog),"matrix"))) # extract common phy table into a data frame
+df.root.common.phy.rlog<-merge(root3.smd[1:33],df.root.common.phy.rlog,by.y="row.names",by.x="SampleID") # combine phy table with sample metadata
+
+saveRDS(df.leaf.common.phy.rlog,file="./phy/df_leaf_common_rlog.rds")
+saveRDS(df.root.common.phy.rlog,file="./phy/df_root_common_rlog.rds")
+save(leaf3.common.phy.rlog,file="./phy/phyloseq_leaf_phy_common_rlog.RData")
+save(root3.common.phy.rlog,file="./phy/phyloseq_root_phy_common_rlog.RData")
+rm(leaf3.common.phy.rlog,root3.common.phy.rlog)
+
+# ------- * execute LMMs in parallel on high performance computing cluster * ------- 
+""" 
+1. on local machine: 
+cd ~/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828
+for level in otu fam ord cla phy; do
+cp ./countmodels_rlogLMM.R $level/
+cp ./populate_rlogLMM.R $level/
+done
+
+2. ssh on HPCC: cd /netscratch/mrw28/Eco_16S/20150828
+mkdir otu
+mkdir fam
+mkdir ord
+mkdir cla
+mkdir phy
+
+# transfer data files and scripts from local machine to HPCC folders for each taxonomic level:
+cd otu
+put /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/otu/*
+cd ../fam
+put /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/fam/*
+cd ../ord
+put /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/ord/*
+cd ../cla
+put /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/cla/*
+cd ../phy
+put /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/phy/*
+
+3. ssh on HPCC: cd /netscratch/mrw28/Eco_16S/20150828
+# Set up a folder for each taxon and start bash scripts for parallel job
+for level in otu fam ord cla phy; do
+cd $level; Rscript populate_rlogLMM.R
+cd ..
+done
+
+4. on HPCC: 
+# WHEN ALL JOBS ARE DONE: gather results:
+
+cd /netscratch/mrw28/Eco_16S/20150828/
+mkdir output
+for level in otu fam ord cla phy; do
+cd $level
+cat root/*/*heritability.txt > ../output/$level.h2.root.wHeaders.txt
+head -1 ../output/$level.h2.root.wHeaders.txt > ../output/$level.h2.root.txt
+grep -v Taxon* ../output/$level.h2.root.wHeaders.txt >> ../output/$level.h2.root.txt
+rm ../output/$level.h2.root.wHeaders.txt
+cat root/*/*LMM_stats.txt > ../output/$level.LMMstats.root.wHeaders.txt
+head -1 ../output/$level.LMMstats.root.wHeaders.txt > ../output/$level.LMMstats.root.txt
+grep -v Taxon* ../output/$level.LMMstats.root.wHeaders.txt >> ../output/$level.LMMstats.root.txt
+rm ../output/$level.LMMstats.root.wHeaders.txt
+cat leaf/*/*heritability.txt > ../output/$level.h2.leaf.wHeaders.txt
+head -1 ../output/$level.h2.leaf.wHeaders.txt > ../output/$level.h2.leaf.txt
+grep -v Taxon* ../output/$level.h2.leaf.wHeaders.txt >> ../output/$level.h2.leaf.txt
+rm ../output/$level.h2.leaf.wHeaders.txt
+cat leaf/*/*LMM_stats.txt > ../output/$level.LMMstats.leaf.wHeaders.txt
+head -1 ../output/$level.LMMstats.leaf.wHeaders.txt > ../output/$level.LMMstats.leaf.txt
+grep -v Taxon* ../output/$level.LMMstats.leaf.wHeaders.txt >> ../output/$level.LMMstats.leaf.txt
+rm ../output/$level.LMMstats.leaf.wHeaders.txt
+cd /netscratch/mrw28/Eco_16S/20150828/
+done
+
+5. sftp #transfer concatenated results files to local machine.
+cd /netscratch/mrw28/Eco_16S/20150828/output
+get otu*.txt /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/otu
+get fam*.txt /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/fam
+get ord*.txt /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/ord
+get cla*.txt /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/cla
+get phy*.txt /Users/MW/Documents/Projects/Ecotypes_ubiome/drafts/full_code_20150828/phy
+"""
+# Back to R:
+####### Load heritability estimates and plot for each site & across sites #######
+h2.taxa<-rbind(data.frame(read.table('otu/otu.h2.leaf.txt',sep='\t',header=TRUE),"Tissue"="leaf","Level"="OTU"),
+               data.frame(read.table('fam/fam.h2.leaf.txt',sep='\t',header=TRUE),"Tissue"="leaf","Level"="Family"),
+               data.frame(read.table('ord/ord.h2.leaf.txt',sep='\t',header=TRUE),"Tissue"="leaf","Level"="Order"),
+               data.frame(read.table('cla/cla.h2.leaf.txt',sep='\t',header=TRUE),"Tissue"="leaf","Level"="Class"),
+               data.frame(read.table('phy/phy.h2.leaf.txt',sep='\t',header=TRUE),"Tissue"="leaf","Level"="Phylum"),
+               data.frame(read.table('otu/otu.h2.root.txt',sep='\t',header=TRUE),"Tissue"="root","Level"="OTU"),
+               data.frame(read.table('fam/fam.h2.root.txt',sep='\t',header=TRUE),"Tissue"="root","Level"="Family"),
+               data.frame(read.table('ord/ord.h2.root.txt',sep='\t',header=TRUE),"Tissue"="root","Level"="Order"),
+               data.frame(read.table('cla/cla.h2.root.txt',sep='\t',header=TRUE),"Tissue"="root","Level"="Class"),
+               data.frame(read.table('phy/phy.h2.root.txt',sep='\t',header=TRUE),"Tissue"="root","Level"="Phylum"))
+# set negative heritabilities to 0
+h2.taxa$H2<-ifelse(h2.taxa$H2<0,0,h2.taxa$H2)
+# combine with phylogenetic information
+h2.otus<-merge(subset(h2.taxa,Level=='OTU'),taxtable,by.x="Taxon",by.y="row.names",suffixes=c("",".y"))
+
+####### Fig. 6a: heritability estimates boxplots ####### 
+mainphyla<-c("Proteobacteria","Actinobacteria","Acidobacteria","Bacteroidetes","Cyanobacteria","Crenarchaeota","Chloroflexi","Armatimonadetes","Verrucomicrobia","Planctomycetes","Gemmatimonadetes","Firmicutes")
+
+pdf(file="plots/Fig6a.pdf",width=15,height=9)
+update_geom_defaults("point", list(colour = NULL))
+ggplot(data = subset(h2.otus, Phylum%in%mainphyla),aes(x=Phylum,y=H2,colour=Site))+
+  geom_boxplot(size=0.8,outlier.colour=NULL,position=position_dodge(w=0.7),outlier.size=2)+
+  facet_grid(Tissue~.)+
+  ylab("Broad-sense heritability (%)\n")+
+  scale_color_manual(values=c("red",sitePalette),name="Site:   ")+
+  theme_minimal()+scale_y_continuous(labels=function(y) 100*y)+
+  theme(axis.text.x = element_text(angle=25,vjust=1, hjust=0.95,size=28,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=34,face="bold"))+
+  theme(axis.text.y=element_text(size=28,face="bold"))+
+  theme(panel.margin=unit(2,"lines"),legend.position="top")+
+  theme(strip.background=element_rect(color="gray90",fill="gray90"))+
+  theme(legend.title=element_text(size=36,face="bold"),legend.text=element_text(size=32,face="bold"))+
+  theme(legend.key.height=unit(2,"lines"),legend.key.width=unit(2.5,"lines"))+
+  theme(strip.text.y = element_text(size=36,face="bold"))
+update_geom_defaults("point", list(colour = "black"))
+dev.off()
+
+#### ------ *** Begin DESeq2 log 2 fold change estimates *** ------ ####
+
+## Negative binomial GLMs of "common" OTUs only (>10% of mean abundance)
+## Justification: throwing out "rare" OTUs in that step reduced total # of observations 
+## by only 2%. Linear mixed models were performed on this "common" set
+
+system("mkdir DESeq2") # make directory to store DESeq2 analyses
+register(MulticoreParam(),default=TRUE)
+multicoreWorkers() # 8 cores available
+
+# Analyses for entire experiment: 
+####### OTU level: Create DESeq2 objects with all fixed effects #######
+dds.leaf.otu<-phyloseq_to_deseq2(leaf3.common,~Genotype*Site+Genotype*Age+Harvested)
+dds.leaf.otu = estimateSizeFactors(dds.leaf.otu, geoMeans = apply(counts(dds.leaf.otu), 1, gm_mean))
+dds.leaf.otu<-DESeq(dds.leaf.otu,test="Wald",fitType="parametric")
+
+dds.root.otu<-phyloseq_to_deseq2(root3.common,~Genotype*Site+Genotype*Age+Harvested)
+dds.root.otu = estimateSizeFactors(dds.root.otu, geoMeans = apply(counts(dds.root.otu), 1, gm_mean))
+dds.root.otu<-DESeq(dds.root.otu,test="Wald",fitType="parametric")
+
+save(dds.leaf.otu,file="DESeq2/DESeq_leaf_otu_allsites.RData")
+save(dds.root.otu,file="DESeq2/DESeq_root_otu_allsites.RData")
+####### Family level: Create DESeq2 objects with all fixed effects #######
+dds.leaf.fam<-phyloseq_to_deseq2(leaf3.common.fam,~Genotype*Site+Genotype*Age+Harvested)
+dds.leaf.fam = estimateSizeFactors(dds.leaf.fam, geoMeans = apply(counts(dds.leaf.fam), 1, gm_mean))
+dds.leaf.fam<-DESeq(dds.leaf.fam,test="Wald",fitType="parametric")
+
+dds.root.fam<-phyloseq_to_deseq2(root3.common.fam,~Genotype*Site+Genotype*Age+Harvested)
+dds.root.fam = estimateSizeFactors(dds.root.fam, geoMeans = apply(counts(dds.root.fam), 1, gm_mean))
+dds.root.fam<-DESeq(dds.root.fam,test="Wald",fitType="parametric")
+
+save(dds.leaf.fam,file="DESeq2/DESeq_leaf_fam_allsites.RData")
+save(dds.root.fam,file="DESeq2/DESeq_root_fam_allsites.RData")
+####### Order level: Create DESeq2 objects with all fixed effects #######
+dds.leaf.ord<-phyloseq_to_deseq2(leaf3.common.ord,~Genotype*Site+Genotype*Age+Harvested)
+dds.leaf.ord = estimateSizeFactors(dds.leaf.ord, geoMeans = apply(counts(dds.leaf.ord), 1, gm_mean))
+dds.leaf.ord<-DESeq(dds.leaf.ord,test="Wald",fitType="parametric")
+
+dds.root.ord<-phyloseq_to_deseq2(root3.common.ord,~Genotype*Site+Genotype*Age+Harvested)
+dds.root.ord = estimateSizeFactors(dds.root.ord, geoMeans = apply(counts(dds.root.ord), 1, gm_mean))
+dds.root.ord<-DESeq(dds.root.ord,test="Wald",fitType="parametric")
+
+save(dds.leaf.ord,file="DESeq2/DESeq_leaf_ord_allsites.RData")
+save(dds.root.ord,file="DESeq2/DESeq_root_ord_allsites.RData")
+####### Class level: Create DESeq2 objects with all fixed effects #######
+dds.leaf.cla<-phyloseq_to_deseq2(leaf3.common.cla,~Genotype*Site+Genotype*Age+Harvested)
+dds.leaf.cla = estimateSizeFactors(dds.leaf.cla, geoMeans = apply(counts(dds.leaf.cla), 1, gm_mean))
+dds.leaf.cla<-DESeq(dds.leaf.cla,test="Wald",fitType="parametric")
+
+dds.root.cla<-phyloseq_to_deseq2(root3.common.cla,~Genotype*Site+Genotype*Age+Harvested)
+dds.root.cla = estimateSizeFactors(dds.root.cla, geoMeans = apply(counts(dds.root.cla), 1, gm_mean))
+dds.root.cla<-DESeq(dds.root.cla,test="Wald",fitType="parametric")
+
+save(dds.leaf.cla,file="DESeq2/DESeq_leaf_cla_allsites.RData")
+save(dds.root.cla,file="DESeq2/DESeq_root_cla_allsites.RData")
+####### Phylum level: Create DESeq2 objects with all fixed effects #######
+dds.leaf.phy<-phyloseq_to_deseq2(leaf3.common.phy,~Genotype*Site+Genotype*Age+Harvested)
+dds.leaf.phy = estimateSizeFactors(dds.leaf.phy, geoMeans = apply(counts(dds.leaf.phy), 1, gm_mean))
+dds.leaf.phy<-DESeq(dds.leaf.phy,test="Wald",fitType="parametric")
+
+dds.root.phy<-phyloseq_to_deseq2(root3.common.phy,~Genotype*Site+Genotype*Age+Harvested)
+dds.root.phy = estimateSizeFactors(dds.root.phy, geoMeans = apply(counts(dds.root.phy), 1, gm_mean))
+dds.root.phy<-DESeq(dds.root.phy,test="Wald",fitType="parametric")
+
+save(dds.leaf.phy,file="DESeq2/DESeq_leaf_phy_allsites.RData")
+save(dds.root.phy,file="DESeq2/DESeq_root_phy_allsites.RData")
+
+# 
+
+####### Whole experiment: OTU:  extract results #######
+# initialize dataframe to hold all results
+DEseq.all.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                          "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                          "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+###### Whole experiment: OTU:  extract Genotype effect #####
+# All pairwise Population contrasts 
+DEseq.all.geno.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="OTU","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="OTU","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.geno.OTU<-rbind(DEseq.all.geno.OTU,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(pop2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each OTU, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.geno.OTU[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.geno.OTU$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.geno.OTU$Taxon))[i]
+  leafsubset<-subset(DEseq.all.geno.OTU,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.geno.OTU$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.geno.OTU,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.geno.OTU$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.geno.OTU<-temp; rm(temp)
+save(DEseq.all.geno.OTU,file="DESeq2/DESeq_all_geno_OTU.RData")
+###### Whole experiment: OTU:  extract Site effect #####
+# All pairwise Site contrasts 
+DEseq.all.site.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(SiteList)-1)){
+  for (j in (i+1):length(SiteList)){
+    site1<-SiteList[i]
+    site2<-SiteList[j]
+    thiscontrast<-paste(site1,site2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="OTU","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="OTU","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.site.OTU<-rbind(DEseq.all.site.OTU,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(site2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+# Get effect-level P value: for each OTU, are all Site contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.site.OTU[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.site.OTU$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.site.OTU$Taxon))[i]
+  leafsubset<-subset(DEseq.all.site.OTU,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.site.OTU$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.site.OTU,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.site.OTU$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.site.OTU<-temp; rm(temp)
+save(DEseq.all.site.OTU,file="DESeq2/DESeq_all_site_OTU.RData")
+###### Whole experiment: OTU:  extract Age effect #####
+# All pairwise Age contrasts 
+DEseq.all.Age.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    Age1<-AgeList[i]
+    Age2<-AgeList[j]
+    thiscontrast<-paste(Age1,Age2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="OTU","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="OTU","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.Age.OTU<-rbind(DEseq.all.Age.OTU,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(Age2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each OTU, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.Age.OTU[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.Age.OTU$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.Age.OTU$Taxon))[i]
+  leafsubset<-subset(DEseq.all.Age.OTU,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.Age.OTU$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.Age.OTU,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.Age.OTU$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.Age.OTU<-temp; rm(temp)
+save(DEseq.all.Age.OTU,file="DESeq2/DESeq_all_age_OTU.RData")
+###### Whole experiment: OTU:  extract Year effect #####
+DEseq.all.year.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+thiscontrast<-"2011_2012"
+thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="OTU","Tissue"="leaf"))
+thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="OTU","Tissue"="root"))
+thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+DEseq.all.year.OTU<-rbind(DEseq.all.year.OTU,thispair.leaf,thispair.root) # append to growing output data frame
+rm(thiscontrast,thispair.leaf,thispair.root)# cleanup
+DEseq.all.year.OTU$padjadj<-DEseq.all.year.OTU$padj # no additional correction needed for just 1 contrast
+save(DEseq.all.year.OTU,file="DESeq2/DESeq_all_Year_OTU.RData")
+###### Whole experiment: OTU:  extract Genotype * Site effect #####
+DEseq.all.GxS.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    for (k in 1:length(SiteList)){ # do all 3 sites for this contrast
+      thissite<-SiteList[k]
+      grp1<-paste("Genotype",pop1,".Site",thissite,sep="")
+      grp2<-paste("Genotype",pop2,".Site",thissite,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="OTU","Tissue"="leaf"))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="OTU","Tissue"="root"))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxS.OTU<-rbind(DEseq.all.GxS.OTU,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thissite) # cleanup
+    }
+    rm(pop2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each OTU, in a given site, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxS.OTU[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxS.OTU$Taxon)))){
+  for (j in 1:3){
+    thissite<-c("Jam","Mah","Sil")[j]
+    thistaxon<-levels(factor(DEseq.all.GxS.OTU$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxS.OTU,Tissue=='leaf' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.OTU$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxS.OTU,Tissue=='root' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.OTU$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxS.OTU<-temp; rm(temp)
+save(DEseq.all.GxS.OTU,file="DESeq2/DESeq_all_GxS_OTU.RData")
+###### Whole experiment: OTU:  extract Genotype * Age effect #####
+DEseq.all.GxA.OTU<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    age1<-AgeList[i]
+    age2<-AgeList[j]
+    thiscontrast<-paste(age1,age2,sep="_")
+    for (k in 1:length(PopList)){ # do all 3 Ages for this contrast
+      thisPop<-PopList[k]
+      grp1<-paste("Genotype",thisPop,".Age",age1,sep="")
+      grp2<-paste("Genotype",thisPop,".Age",age2,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.otu,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="OTU","Tissue"="leaf","Genotype"=thisPop))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.otu,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="OTU","Tissue"="root","Genotype"=thisPop))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxA.OTU<-rbind(DEseq.all.GxA.OTU,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thisPop) # cleanup
+    }
+    rm(age2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each OTU, in a given Genotype, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxA.OTU[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxA.OTU$Taxon)))){
+  for (j in 1:5){
+    thisgeno<-c("JAM","MAH","MIL","PAR","SIL")[j]
+    thistaxon<-levels(factor(DEseq.all.GxA.OTU$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxA.OTU,Tissue=='leaf' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.OTU$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxA.OTU,Tissue=='root' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.OTU$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxA.OTU<-temp; rm(temp)
+save(DEseq.all.GxA.OTU,file="DESeq2/DESeq_all_GxA_OTU.RData")
+
+####### Whole experiment: fam:  extract results #######
+# initialize dataframe to hold all results
+DEseq.all.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                          "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                          "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+###### Whole experiment: fam:  extract Genotype effect #####
+# All pairwise Population contrasts 
+DEseq.all.geno.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="fam","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="fam","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.geno.fam<-rbind(DEseq.all.geno.fam,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(pop2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each fam, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.geno.fam[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.geno.fam$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.geno.fam$Taxon))[i]
+  leafsubset<-subset(DEseq.all.geno.fam,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.geno.fam$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.geno.fam,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.geno.fam$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.geno.fam<-temp; rm(temp)
+save(DEseq.all.geno.fam,file="DESeq2/DESeq_all_geno_fam.RData")
+###### Whole experiment: fam:  extract Site effect #####
+# All pairwise Site contrasts 
+DEseq.all.site.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(SiteList)-1)){
+  for (j in (i+1):length(SiteList)){
+    site1<-SiteList[i]
+    site2<-SiteList[j]
+    thiscontrast<-paste(site1,site2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="fam","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="fam","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.site.fam<-rbind(DEseq.all.site.fam,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(site2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+# Get effect-level P value: for each fam, are all Site contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.site.fam[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.site.fam$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.site.fam$Taxon))[i]
+  leafsubset<-subset(DEseq.all.site.fam,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.site.fam$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.site.fam,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.site.fam$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.site.fam<-temp; rm(temp)
+save(DEseq.all.site.fam,file="DESeq2/DESeq_all_site_fam.RData")
+###### Whole experiment: fam:  extract Age effect #####
+# All pairwise Age contrasts 
+DEseq.all.Age.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    Age1<-AgeList[i]
+    Age2<-AgeList[j]
+    thiscontrast<-paste(Age1,Age2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="fam","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="fam","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.Age.fam<-rbind(DEseq.all.Age.fam,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(Age2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each fam, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.Age.fam[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.Age.fam$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.Age.fam$Taxon))[i]
+  leafsubset<-subset(DEseq.all.Age.fam,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.Age.fam$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.Age.fam,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.Age.fam$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.Age.fam<-temp; rm(temp)
+save(DEseq.all.Age.fam,file="DESeq2/DESeq_all_age_fam.RData")
+###### Whole experiment: fam:  extract Year effect #####
+DEseq.all.year.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+thiscontrast<-"2011_2012"
+thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="fam","Tissue"="leaf"))
+thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="fam","Tissue"="root"))
+thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+DEseq.all.year.fam<-rbind(DEseq.all.year.fam,thispair.leaf,thispair.root) # append to growing output data frame
+rm(thiscontrast,thispair.leaf,thispair.root)# cleanup
+DEseq.all.year.fam$padjadj<-DEseq.all.year.fam$padj # no additional correction needed for just 1 contrast
+save(DEseq.all.year.fam,file="DESeq2/DESeq_all_Year_fam.RData")
+###### Whole experiment: fam:  extract Genotype * Site effect #####
+DEseq.all.GxS.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    for (k in 1:length(SiteList)){ # do all 3 sites for this contrast
+      thissite<-SiteList[k]
+      grp1<-paste("Genotype",pop1,".Site",thissite,sep="")
+      grp2<-paste("Genotype",pop2,".Site",thissite,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="fam","Tissue"="leaf"))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="fam","Tissue"="root"))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxS.fam<-rbind(DEseq.all.GxS.fam,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thissite) # cleanup
+    }
+    rm(pop2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each fam, in a given site, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxS.fam[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxS.fam$Taxon)))){
+  for (j in 1:3){
+    thissite<-c("Jam","Mah","Sil")[j]
+    thistaxon<-levels(factor(DEseq.all.GxS.fam$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxS.fam,Tissue=='leaf' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.fam$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxS.fam,Tissue=='root' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.fam$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxS.fam<-temp; rm(temp)
+save(DEseq.all.GxS.fam,file="DESeq2/DESeq_all_GxS_fam.RData")
+###### Whole experiment: fam:  extract Genotype * Age effect #####
+DEseq.all.GxA.fam<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    age1<-AgeList[i]
+    age2<-AgeList[j]
+    thiscontrast<-paste(age1,age2,sep="_")
+    for (k in 1:length(PopList)){ # do all 3 Ages for this contrast
+      thisPop<-PopList[k]
+      grp1<-paste("Genotype",thisPop,".Age",age1,sep="")
+      grp2<-paste("Genotype",thisPop,".Age",age2,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.fam,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="fam","Tissue"="leaf","Genotype"=thisPop))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.fam,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="fam","Tissue"="root","Genotype"=thisPop))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxA.fam<-rbind(DEseq.all.GxA.fam,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thisPop) # cleanup
+    }
+    rm(age2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each fam, in a given Genotype, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxA.fam[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxA.fam$Taxon)))){
+  for (j in 1:5){
+    thisgeno<-c("JAM","MAH","MIL","PAR","SIL")[j]
+    thistaxon<-levels(factor(DEseq.all.GxA.fam$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxA.fam,Tissue=='leaf' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.fam$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxA.fam,Tissue=='root' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.fam$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxA.fam<-temp; rm(temp)
+save(DEseq.all.GxA.fam,file="DESeq2/DESeq_all_GxA_fam.RData")
+
+####### Whole experiment: ord:  extract results #######
+# initialize dataframe to hold all results
+DEseq.all.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                          "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                          "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+###### Whole experiment: ord:  extract Genotype effect #####
+# All pairwise Population contrasts 
+DEseq.all.geno.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="ord","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="ord","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.geno.ord<-rbind(DEseq.all.geno.ord,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(pop2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each ord, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.geno.ord[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.geno.ord$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.geno.ord$Taxon))[i]
+  leafsubset<-subset(DEseq.all.geno.ord,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.geno.ord$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.geno.ord,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.geno.ord$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.geno.ord<-temp; rm(temp)
+save(DEseq.all.geno.ord,file="DESeq2/DESeq_all_geno_ord.RData")
+###### Whole experiment: ord:  extract Site effect #####
+# All pairwise Site contrasts 
+DEseq.all.site.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(SiteList)-1)){
+  for (j in (i+1):length(SiteList)){
+    site1<-SiteList[i]
+    site2<-SiteList[j]
+    thiscontrast<-paste(site1,site2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="ord","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="ord","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.site.ord<-rbind(DEseq.all.site.ord,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(site2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+# Get effect-level P value: for each ord, are all Site contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.site.ord[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.site.ord$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.site.ord$Taxon))[i]
+  leafsubset<-subset(DEseq.all.site.ord,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.site.ord$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.site.ord,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.site.ord$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.site.ord<-temp; rm(temp)
+save(DEseq.all.site.ord,file="DESeq2/DESeq_all_site_ord.RData")
+###### Whole experiment: ord:  extract Age effect #####
+# All pairwise Age contrasts 
+DEseq.all.Age.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    Age1<-AgeList[i]
+    Age2<-AgeList[j]
+    thiscontrast<-paste(Age1,Age2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="ord","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="ord","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.Age.ord<-rbind(DEseq.all.Age.ord,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(Age2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each ord, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.Age.ord[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.Age.ord$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.Age.ord$Taxon))[i]
+  leafsubset<-subset(DEseq.all.Age.ord,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.Age.ord$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.Age.ord,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.Age.ord$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.Age.ord<-temp; rm(temp)
+save(DEseq.all.Age.ord,file="DESeq2/DESeq_all_age_ord.RData")
+###### Whole experiment: ord:  extract Year effect #####
+DEseq.all.year.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+thiscontrast<-"2011_2012"
+thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="ord","Tissue"="leaf"))
+thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="ord","Tissue"="root"))
+thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+DEseq.all.year.ord<-rbind(DEseq.all.year.ord,thispair.leaf,thispair.root) # append to growing output data frame
+rm(thiscontrast,thispair.leaf,thispair.root)# cleanup
+DEseq.all.year.ord$padjadj<-DEseq.all.year.ord$padj # no additional correction needed for just 1 contrast
+save(DEseq.all.year.ord,file="DESeq2/DESeq_all_Year_ord.RData")
+###### Whole experiment: ord:  extract Genotype * Site effect #####
+DEseq.all.GxS.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    for (k in 1:length(SiteList)){ # do all 3 sites for this contrast
+      thissite<-SiteList[k]
+      grp1<-paste("Genotype",pop1,".Site",thissite,sep="")
+      grp2<-paste("Genotype",pop2,".Site",thissite,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="ord","Tissue"="leaf"))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="ord","Tissue"="root"))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxS.ord<-rbind(DEseq.all.GxS.ord,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thissite) # cleanup
+    }
+    rm(pop2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each ord, in a given site, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxS.ord[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxS.ord$Taxon)))){
+  for (j in 1:3){
+    thissite<-c("Jam","Mah","Sil")[j]
+    thistaxon<-levels(factor(DEseq.all.GxS.ord$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxS.ord,Tissue=='leaf' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.ord$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxS.ord,Tissue=='root' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.ord$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxS.ord<-temp; rm(temp)
+save(DEseq.all.GxS.ord,file="DESeq2/DESeq_all_GxS_ord.RData")
+###### Whole experiment: ord:  extract Genotype * Age effect #####
+DEseq.all.GxA.ord<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    age1<-AgeList[i]
+    age2<-AgeList[j]
+    thiscontrast<-paste(age1,age2,sep="_")
+    for (k in 1:length(PopList)){ # do all 3 Ages for this contrast
+      thisPop<-PopList[k]
+      grp1<-paste("Genotype",thisPop,".Age",age1,sep="")
+      grp2<-paste("Genotype",thisPop,".Age",age2,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.ord,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="ord","Tissue"="leaf","Genotype"=thisPop))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.ord,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="ord","Tissue"="root","Genotype"=thisPop))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxA.ord<-rbind(DEseq.all.GxA.ord,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thisPop) # cleanup
+    }
+    rm(age2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each ord, in a given Genotype, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxA.ord[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxA.ord$Taxon)))){
+  for (j in 1:5){
+    thisgeno<-c("JAM","MAH","MIL","PAR","SIL")[j]
+    thistaxon<-levels(factor(DEseq.all.GxA.ord$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxA.ord,Tissue=='leaf' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.ord$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxA.ord,Tissue=='root' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.ord$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxA.ord<-temp; rm(temp)
+save(DEseq.all.GxA.ord,file="DESeq2/DESeq_all_GxA_ord.RData")
+
+####### Whole experiment: cla:  extract results #######
+# initialize dataframe to hold all results
+DEseq.all.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                          "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                          "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+###### Whole experiment: cla:  extract Genotype effect #####
+# All pairwise Population contrasts 
+DEseq.all.geno.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="cla","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="cla","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.geno.cla<-rbind(DEseq.all.geno.cla,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(pop2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each cla, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.geno.cla[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.geno.cla$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.geno.cla$Taxon))[i]
+  leafsubset<-subset(DEseq.all.geno.cla,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.geno.cla$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.geno.cla,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.geno.cla$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.geno.cla<-temp; rm(temp)
+save(DEseq.all.geno.cla,file="DESeq2/DESeq_all_geno_cla.RData")
+###### Whole experiment: cla:  extract Site effect #####
+# All pairwise Site contrasts 
+DEseq.all.site.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(SiteList)-1)){
+  for (j in (i+1):length(SiteList)){
+    site1<-SiteList[i]
+    site2<-SiteList[j]
+    thiscontrast<-paste(site1,site2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="cla","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="cla","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.site.cla<-rbind(DEseq.all.site.cla,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(site2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+# Get effect-level P value: for each cla, are all Site contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.site.cla[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.site.cla$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.site.cla$Taxon))[i]
+  leafsubset<-subset(DEseq.all.site.cla,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.site.cla$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.site.cla,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.site.cla$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.site.cla<-temp; rm(temp)
+save(DEseq.all.site.cla,file="DESeq2/DESeq_all_site_cla.RData")
+###### Whole experiment: cla:  extract Age effect #####
+# All pairwise Age contrasts 
+DEseq.all.Age.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    Age1<-AgeList[i]
+    Age2<-AgeList[j]
+    thiscontrast<-paste(Age1,Age2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="cla","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="cla","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.Age.cla<-rbind(DEseq.all.Age.cla,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(Age2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each cla, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.Age.cla[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.Age.cla$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.Age.cla$Taxon))[i]
+  leafsubset<-subset(DEseq.all.Age.cla,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.Age.cla$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.Age.cla,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.Age.cla$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.Age.cla<-temp; rm(temp)
+save(DEseq.all.Age.cla,file="DESeq2/DESeq_all_age_cla.RData")
+###### Whole experiment: cla:  extract Year effect #####
+DEseq.all.year.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+thiscontrast<-"2011_2012"
+thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="cla","Tissue"="leaf"))
+thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="cla","Tissue"="root"))
+thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+DEseq.all.year.cla<-rbind(DEseq.all.year.cla,thispair.leaf,thispair.root) # append to growing output data frame
+rm(thiscontrast,thispair.leaf,thispair.root)# cleanup
+DEseq.all.year.cla$padjadj<-DEseq.all.year.cla$padj # no additional correction needed for just 1 contrast
+save(DEseq.all.year.cla,file="DESeq2/DESeq_all_Year_cla.RData")
+###### Whole experiment: cla:  extract Genotype * Site effect #####
+DEseq.all.GxS.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    for (k in 1:length(SiteList)){ # do all 3 sites for this contrast
+      thissite<-SiteList[k]
+      grp1<-paste("Genotype",pop1,".Site",thissite,sep="")
+      grp2<-paste("Genotype",pop2,".Site",thissite,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="cla","Tissue"="leaf"))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="cla","Tissue"="root"))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxS.cla<-rbind(DEseq.all.GxS.cla,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thissite) # cleanup
+    }
+    rm(pop2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each cla, in a given site, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxS.cla[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxS.cla$Taxon)))){
+  for (j in 1:3){
+    thissite<-c("Jam","Mah","Sil")[j]
+    thistaxon<-levels(factor(DEseq.all.GxS.cla$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxS.cla,Tissue=='leaf' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.cla$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxS.cla,Tissue=='root' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.cla$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxS.cla<-temp; rm(temp)
+save(DEseq.all.GxS.cla,file="DESeq2/DESeq_all_GxS_cla.RData")
+###### Whole experiment: cla:  extract Genotype * Age effect #####
+DEseq.all.GxA.cla<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    age1<-AgeList[i]
+    age2<-AgeList[j]
+    thiscontrast<-paste(age1,age2,sep="_")
+    for (k in 1:length(PopList)){ # do all 3 Ages for this contrast
+      thisPop<-PopList[k]
+      grp1<-paste("Genotype",thisPop,".Age",age1,sep="")
+      grp2<-paste("Genotype",thisPop,".Age",age2,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.cla,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="cla","Tissue"="leaf","Genotype"=thisPop))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.cla,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="cla","Tissue"="root","Genotype"=thisPop))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxA.cla<-rbind(DEseq.all.GxA.cla,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thisPop) # cleanup
+    }
+    rm(age2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each cla, in a given Genotype, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxA.cla[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxA.cla$Taxon)))){
+  for (j in 1:5){
+    thisgeno<-c("JAM","MAH","MIL","PAR","SIL")[j]
+    thistaxon<-levels(factor(DEseq.all.GxA.cla$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxA.cla,Tissue=='leaf' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.cla$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxA.cla,Tissue=='root' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.cla$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxA.cla<-temp; rm(temp)
+save(DEseq.all.GxA.cla,file="DESeq2/DESeq_all_GxA_cla.RData")
+
+####### Whole experiment: phy:  extract results #######
+# initialize dataframe to hold all results
+DEseq.all.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                          "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                          "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+###### Whole experiment: phy:  extract Genotype effect #####
+# All pairwise Population contrasts 
+DEseq.all.geno.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="phy","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=c("Genotype",pop1,pop2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Genotype","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="all","Level"="phy","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.geno.phy<-rbind(DEseq.all.geno.phy,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(pop2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each phy, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.geno.phy[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.geno.phy$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.geno.phy$Taxon))[i]
+  leafsubset<-subset(DEseq.all.geno.phy,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.geno.phy$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.geno.phy,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.geno.phy$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.geno.phy<-temp; rm(temp)
+save(DEseq.all.geno.phy,file="DESeq2/DESeq_all_geno_phy.RData")
+###### Whole experiment: phy:  extract Site effect #####
+# All pairwise Site contrasts 
+DEseq.all.site.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(SiteList)-1)){
+  for (j in (i+1):length(SiteList)){
+    site1<-SiteList[i]
+    site2<-SiteList[j]
+    thiscontrast<-paste(site1,site2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="phy","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=c("Site",site1,site2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Site","Contrast"=thiscontrast,"Site"=thiscontrast,"Age"="all","Harvested"="all","Level"="phy","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.site.phy<-rbind(DEseq.all.site.phy,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(site2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+# Get effect-level P value: for each phy, are all Site contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.site.phy[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.site.phy$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.site.phy$Taxon))[i]
+  leafsubset<-subset(DEseq.all.site.phy,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.site.phy$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.site.phy,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.site.phy$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.site.phy<-temp; rm(temp)
+save(DEseq.all.site.phy,file="DESeq2/DESeq_all_site_phy.RData")
+###### Whole experiment: phy:  extract Age effect #####
+# All pairwise Age contrasts 
+DEseq.all.Age.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    Age1<-AgeList[i]
+    Age2<-AgeList[j]
+    thiscontrast<-paste(Age1,Age2,sep="_")
+    thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="phy","Tissue"="leaf"))
+    thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+    thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=c("Age",Age1,Age2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                         data.frame("Term"="Age","Contrast"=thiscontrast,"Site"="all","Age"=thiscontrast,"Harvested"="all","Level"="phy","Tissue"="root"))
+    thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+    DEseq.all.Age.phy<-rbind(DEseq.all.Age.phy,thispair.leaf,thispair.root) # append to growing output data frame
+    rm(Age2,thiscontrast,thispair.leaf,thispair.root)# cleanup
+  }
+}
+
+# Get effect-level P value: for each phy, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.Age.phy[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.Age.phy$Taxon)))){
+  thistaxon<-levels(factor(DEseq.all.Age.phy$Taxon))[i]
+  leafsubset<-subset(DEseq.all.Age.phy,Tissue=='leaf' & Taxon==thistaxon & !is.na(DEseq.all.Age.phy$padj))
+  leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+  rootsubset<-subset(DEseq.all.Age.phy,Tissue=='root' & Taxon==thistaxon & !is.na(DEseq.all.Age.phy$padj))
+  rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+  temp<-rbind(temp,leafsubset,rootsubset)
+}
+DEseq.all.Age.phy<-temp; rm(temp)
+save(DEseq.all.Age.phy,file="DESeq2/DESeq_all_age_phy.RData")
+###### Whole experiment: phy:  extract Year effect #####
+DEseq.all.year.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                               "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                               "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+thiscontrast<-"2011_2012"
+thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="phy","Tissue"="leaf"))
+thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=c("Harvested","2011","2012"),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                     data.frame("Term"="Harvested","Contrast"=thiscontrast,"Site"="all","Age"="all","Harvested"="2011_2012","Level"="phy","Tissue"="root"))
+thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+DEseq.all.year.phy<-rbind(DEseq.all.year.phy,thispair.leaf,thispair.root) # append to growing output data frame
+rm(thiscontrast,thispair.leaf,thispair.root)# cleanup
+DEseq.all.year.phy$padjadj<-DEseq.all.year.phy$padj # no additional correction needed for just 1 contrast
+save(DEseq.all.year.phy,file="DESeq2/DESeq_all_Year_phy.RData")
+###### Whole experiment: phy:  extract Genotype * Site effect #####
+DEseq.all.GxS.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+SiteList<-c("Jam","Mah","Sil")
+for (i in 1:(length(PopList)-1)){
+  for (j in (i+1):length(PopList)){
+    pop1<-PopList[i]
+    pop2<-PopList[j]
+    thiscontrast<-paste(pop1,pop2,sep="_")
+    for (k in 1:length(SiteList)){ # do all 3 sites for this contrast
+      thissite<-SiteList[k]
+      grp1<-paste("Genotype",pop1,".Site",thissite,sep="")
+      grp2<-paste("Genotype",pop2,".Site",thissite,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="phy","Tissue"="leaf"))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxS","Contrast"=thiscontrast,"Site"=thissite,"Age"="all","Harvested"="all","Level"="phy","Tissue"="root"))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxS.phy<-rbind(DEseq.all.GxS.phy,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thissite) # cleanup
+    }
+    rm(pop2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each phy, in a given site, are all Genotype contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxS.phy[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxS.phy$Taxon)))){
+  for (j in 1:3){
+    thissite<-c("Jam","Mah","Sil")[j]
+    thistaxon<-levels(factor(DEseq.all.GxS.phy$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxS.phy,Tissue=='leaf' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.phy$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxS.phy,Tissue=='root' & Taxon==thistaxon & Site==thissite & !is.na(DEseq.all.GxS.phy$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxS.phy<-temp; rm(temp)
+save(DEseq.all.GxS.phy,file="DESeq2/DESeq_all_GxS_phy.RData")
+###### Whole experiment: phy:  extract Genotype * Age effect #####
+DEseq.all.GxA.phy<-data.frame("baseMean"=numeric(),"log2FoldChange"=numeric(),"lfcSE"=numeric(),"Term"=character(),
+                              "stat"=numeric(),"pvalue"=numeric(),"padj"=numeric(),"Age"=character(),"Harvested"=character(),
+                              "Site"=character(),"Contrast"=character(),"Taxon"=character(),"Tissue"=character())
+PopList<-c("JAM","MAH","MIL","PAR","SIL")
+AgeList<-c("2","3","4")
+for (i in 1:(length(AgeList)-1)){
+  for (j in (i+1):length(AgeList)){
+    age1<-AgeList[i]
+    age2<-AgeList[j]
+    thiscontrast<-paste(age1,age2,sep="_")
+    for (k in 1:length(PopList)){ # do all 3 Ages for this contrast
+      thisPop<-PopList[k]
+      grp1<-paste("Genotype",thisPop,".Age",age1,sep="")
+      grp2<-paste("Genotype",thisPop,".Age",age2,sep="")
+      thispair.leaf<-cbind(as.data.frame(results(dds.leaf.phy,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="phy","Tissue"="leaf","Genotype"=thisPop))
+      thispair.leaf$Taxon<-row.names(thispair.leaf) # preserve taxa names
+      thispair.root<-cbind(as.data.frame(results(dds.root.phy,contrast=list(grp1,grp2),alpha=0.05,parallel=TRUE,BPPARAM=MulticoreParam(workers=7))),
+                           data.frame("Term"="GxA","Contrast"=thiscontrast,"Age"=thiscontrast,"Site"="all","Harvested"="all","Level"="phy","Tissue"="root","Genotype"=thisPop))
+      thispair.root$Taxon<-row.names(thispair.root) # preserve taxa names
+      DEseq.all.GxA.phy<-rbind(DEseq.all.GxA.phy,thispair.leaf,thispair.root) # append to growing output data frame  
+      rm(grp1,grp2,thispair.leaf,thispair.root,thisPop) # cleanup
+    }
+    rm(age2,thiscontrast)# cleanup
+  }
+}
+# Get effect-level P value: for each phy, in a given Genotype, are all Age contrasts simultaneously nonzero?
+temp<-cbind(DEseq.all.GxA.phy[0,],data.frame("padjadj"=numeric()))
+for (i in 1:length(levels(factor(DEseq.all.GxA.phy$Taxon)))){
+  for (j in 1:5){
+    thisgeno<-c("JAM","MAH","MIL","PAR","SIL")[j]
+    thistaxon<-levels(factor(DEseq.all.GxA.phy$Taxon))[i]
+    leafsubset<-subset(DEseq.all.GxA.phy,Tissue=='leaf' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.phy$padj))
+    leafsubset$padjadj<-p.adjust(leafsubset$padj,method="BH")
+    rootsubset<-subset(DEseq.all.GxA.phy,Tissue=='root' & Taxon==thistaxon & Genotype==thisgeno & !is.na(DEseq.all.GxA.phy$padj))
+    rootsubset$padjadj<-p.adjust(rootsubset$padj,method="BH")
+    temp<-rbind(temp,leafsubset,rootsubset)
+  }
+}
+DEseq.all.GxA.phy<-temp; rm(temp)
+save(DEseq.all.GxA.phy,file="DESeq2/DESeq_all_GxA_phy.RData")
+
+####### Extract significant log2 fold changes for each NBM term at all levels #######
+l2fc.all.sig<-DEseq.all.GxA.OTU[0,] # copy data frame structure
+for (i in 1:6){
+  term<-c("site","year","geno","GxS","Age","GxA")[i]
+  for (j in 1:5){
+    level<-c("OTU","fam","ord","cla","phy")[j]
+    deseq<-subset(get(paste0("DEseq.all.",term,".",level)),padjadj<0.05) # get significant results data frame for this term, level
+    if (level!='GxA'){
+      deseq$Genotype<-'all'
+    }
+    l2fc.all.sig<-rbind(l2fc.all.sig,deseq)
+    rm(deseq,level)
+  }
+}
+
+  
+####### Fig 4b: Boxplot: effect sizes (fold changes for each NBM term at all levels) #######
+pdf(file="plots/Fig4b.pdf",width=19,height=12)
+update_geom_defaults("point", list(colour = NULL))
+ggplot(l2fc.all.sig.shortTerms,aes(x=Level,y=abs(log2FoldChange),color=Tissue))+
+  geom_boxplot(size=1.5,width=1,outlier.colour=NULL,position=position_dodge(w=1),outlier.size=3)+
+  facet_grid(.~Term)+
+  ylab("Fold changes attributed to each\nsource of variation\n")+
+  scale_color_manual(values=c("forest green","grey"))+
+  scale_x_discrete(breaks=c("OTU","fam","ord","cla","phy"),
+                   labels=c("OTU","Family","Order","Class","Phylum"))+
+  theme_classic()+
+  theme(panel.margin = unit(1.35, "lines"))+
+  theme(strip.text.x=element_text(size=34,face="bold",lineheight=0.3),strip.background=element_rect(fill="gray95",color="gray95"))+
+  theme(axis.text.x = element_text(size=28,angle=55,vjust=1,hjust=1,lineheight=0.2,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=36,face="bold"))+
+  theme(legend.title= element_blank(),legend.text=element_text(size=36,face="bold"))+
+  theme(axis.text.y=element_text(size=28,face="bold"),legend.position=c(0.85,0.85))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2.5,"lines"))
+update_geom_defaults("point", list(colour = "black"))
+dev.off()
+
+# Modify Terms for nicer plotting:
+l2fc.all.sig.shortTerms<-l2fc.all.sig
+l2fc.all.sig.shortTerms$Term<-mapvalues(l2fc.all.sig.shortTerms$Term,from=c("Harvested","Genotype"),to=c("Year","Geno."))
+l2fc.all.sig.shortTerms$Term<-paste0("\n",l2fc.all.sig.shortTerms$Term,"\n") # add spacing
+pdf(file="plots/Fig4b.pdf",width=15,height=12)
+update_geom_defaults("point", list(colour = NULL))
+ggplot(l2fc.all.sig.shortTerms,aes(x=Level,y=abs(log2FoldChange),color=Tissue))+
+  geom_boxplot(size=1.5,width=1,outlier.colour=NULL,position=position_dodge(w=1),outlier.size=3)+
+  facet_grid(.~Term)+
+  ylab("Fold changes attributed to each\nsource of variation\n")+
+  scale_color_manual(values=c("forest green","grey"))+
+  scale_x_discrete(breaks=c("OTU","fam","ord","cla","phy"),
+                   labels=c("OTU","Family","Order","Class","Phylum"))+
+  theme_classic()+
+  theme(panel.margin = unit(1.35, "lines"))+
+  theme(strip.text.x=element_text(size=34,face="bold",lineheight=0.3),strip.background=element_rect(fill="gray95",color="gray95"))+
+  theme(axis.text.x = element_text(size=28,angle=55,vjust=1,hjust=1,lineheight=0.2,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=36,face="bold"))+
+  theme(legend.title= element_blank(),legend.text=element_text(size=36,face="bold"))+
+  theme(axis.text.y=element_text(size=28,face="bold"),legend.position=c(0.85,0.85))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2.5,"lines"))
+update_geom_defaults("point", list(colour = "black"))
+dev.off()
+rm(l2fc.all.sig.shortTerms)
+####### Fig. 5b. Dotplot: OTU fold changes due to genotype #######
+l2fc.geno.OTU<-subset(l2fc.all.sig,Level=='OTU' & Term=='Genotype')
+l2fc.geno.OTU<-merge(l2fc.geno.OTU,as.data.frame(as(tax_table(root3.common),"matrix")),by.x="Taxon",by.y="row.names")
+
+pdf(file="plots/Fig5b.pdf",height=10,width=15)
+set.seed(777) # for reproducible jitter
+ggplot(l2fc.geno.OTU,
+       aes(x=Phylum,y=abs(log2FoldChange),color=Tissue,fill=Tissue))+
+  geom_point(size=5,position=position_jitterdodge(jitter.width=0.4,dodge.width=0.6),alpha=0.5)+
+  scale_color_manual(values=c("forest green","dark grey"),guide=FALSE)+
+  scale_fill_manual(values=c("forest green","dark grey"),guide=FALSE)+
+  ylab("Fold change attributed\nto host genotype\n")+
+  xlab("Phylum")+
+  scale_y_continuous(labels=function(y) format(y^2,digits=2))+
+  theme_classic()+
+  theme(axis.text.x = element_text(size=34,face="bold",angle=65,hjust=0.8,vjust=0.85))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=32,face="bold"))+
+  theme(legend.title= element_blank(),legend.text=element_text(size=36,face="bold"))+
+  theme(axis.text.y=element_text(size=32,face="bold"),legend.position=c(0.5,0.9))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2,"line"),legend.key.width=unit(2,"line"))
+dev.off()
+####### Extract hits for each NBM term at all levels #######
+NBMhits<-data.frame("Level"=factor(),"Taxon"=factor(),"Term"=factor(),"Tissue"=factor(),"padjadj"=numeric(),"RelAbund"=numeric())
+for (i in 1:6){
+  term<-c("site","year","geno","GxS","Age","GxA")[i]
+  for (j in 1:5){
+    level<-c("OTU","fam","ord","cla","phy")[j]
+    deseq<-get(paste0("DEseq.all.",term,".",level)) # get results data frame for this term
+    deseq$Taxon<-factor(deseq$Taxon)
+    leafRA<-get(paste0("relabund.leaf.",level))
+    rootRA<-get(paste0("relabund.root.",level))
+    leafhits<-data.frame("Taxon"=levels(factor(subset(deseq,padjadj<0.05 & Tissue=='leaf')$Taxon)))
+    roothits<-data.frame("Taxon"=levels(factor(subset(deseq,padjadj<0.05 & Tissue=='root')$Taxon)))
+    leafhits<-merge(leafhits,leafRA[c('Taxon','RelAbund')],by='Taxon')
+    roothits<-merge(roothits,rootRA[c('Taxon','RelAbund')],by='Taxon')
+    leafhits<-within(leafhits, {Tissue<-'leaf';Level<-level;Term<-term})
+    roothits<-within(roothits, {Tissue<-'root';Level<-level;Term<-term})
+    NBMhits<-rbind(NBMhits,leafhits,roothits)
+    #rm(level,leafRA,rootRA,leafhits,roothits,deseq) # cleanup
+  }
+}
+NBMhits$Term<-mapvalues(NBMhits$Term,from=c("site","year","geno"),to=c("Site","Harvested","Genotype"))
+
+# sum relative abundances
+weighted.NBM<-data.frame("Level"=factor(),"Term"=factor(),"Tissue"=factor(),"RelAbund"=numeric())
+for (i in 1:6){
+  term<-c("Site","Harvested","Genotype","GxS","Age","GxA")[i]
+  for (j in 1:5){
+    level<-c("OTU","fam","ord","cla","phy")[j]
+    leafRA<-sum(subset(NBMhits,Term==term & Level==level & Tissue=='leaf')$RelAbund)
+    rootRA<-sum(subset(NBMhits,Term==term & Level==level & Tissue=='root')$RelAbund)
+    weighted.NBM<-rbind(weighted.NBM,
+                        data.frame("Level"=level,"Term"=term,"Tissue"='leaf',"RelAbund"=leafRA),
+                        data.frame("Level"=level,"Term"=term,"Tissue"='root',"RelAbund"=rootRA))
+    rm(level,leafRA,rootRA)
+  }
+}
+####### Fig. 4a: Barplot: WEIGHTED proportions of taxa predicted by NBMs #######
+weighted.NBM.shortTerms<-weighted.NBM
+weighted.NBM.shortTerms$Term<-mapvalues(weighted.NBM.shortTerms$Term,from=c("Harvested","Genotype"),to=c("Year","Geno."))
+weighted.NBM.shortTerms$Term<-paste0("\n",weighted.NBM.shortTerms$Term,"\n") # add spacing
+pdf(file="plots/Fig4a.pdf",width=19,height=12)
+ggplot(weighted.NBM.shortTerms,aes(x=Level,y=RelAbund,fill=Tissue))+
+  geom_bar(stat="identity",position="dodge",width=1)+
+  facet_grid(.~Term)+
+  ylab("Cumulative relative abundance of taxa\nresponsive to each source of variation (%)\n")+
+  scale_fill_manual(values=c("forest green","grey"))+
+  scale_x_discrete(breaks=c("OTU","fam","ord","cla","phy"),
+                   labels=c("OTU","Family","Order","Class","Phylum"))+
+  theme_classic()+scale_y_continuous(labels=function(y) 100*y)+
+  theme(panel.margin = unit(1.35, "lines"))+
+  theme(strip.text.x=element_text(size=34,face="bold",lineheight=0.3),strip.background=element_rect(fill="gray95",color="gray95"))+
+  theme(axis.text.x = element_text(size=28,angle=55,vjust=1,hjust=1,lineheight=0.2,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=36,face="bold"))+
+  theme(legend.title= element_blank(),legend.text=element_text(size=36,face="bold"))+
+  theme(axis.text.y=element_text(size=28,face="bold"),legend.position=c(0.5,0.85))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2.5,"lines"))
+dev.off()
+####### Fig. 6c: Dotplot: Genotype*Site #######
+l2fc.GxS.OTU<-subset(l2fc.all.sig, Level=='OTU' & Term=='GxS')
+pdf(file="plots/Fig6c.pdf",height=9,width=9)
+set.seed(777) # for reproducible jitter
+ggplot(l2fc.GxS.OTU,
+       aes(x=Tissue,y=abs(log2FoldChange),color=Site,fill=Site))+
+  geom_point(size=4,position=position_jitterdodge(jitter.width=0.7,dodge.width=0.6),alpha=0.7)+
+  scale_color_manual(values=sitePalette)+
+  ylab("Fold change attributed\nto host genotype")+
+  theme_classic()+scale_y_continuous(breaks=c(2,4,6,8,10))+
+  theme(axis.text.x = element_text(size=36,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=36,face="bold"))+
+  theme(legend.title= element_text(size=36,face="bold"),legend.text=element_text(size=28,face="bold"))+
+  theme(axis.text.y=element_text(size=32,face="bold"),legend.position=c(0.85,0.85))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2.5,"line"),legend.key.width=unit(2.5,"line"))
+dev.off()
+####### Fig. 6d: Barplot: What (weighted) proportion of OTUs differ between genotypes at each site? #######
+#### NOTE: needs more work:
+# do for multiple taxonomic levels?
+# weight by Site-Specific relative abundance, NOT experiment-wide! 
+# add constitutive genotype effects as well?
+
+l2fc.GxS.OTU$Taxon<-factor(l2fc.GxS.OTU$Taxon)
+prop.GxS.OTU.leaf<-rbind(data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='leaf' & Site=='Jam')$Taxon)),"Site"="Jam"),
+                         data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='leaf' & Site=='Mah')$Taxon)),"Site"="Mah"),
+                         data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='leaf' & Site=='Sil')$Taxon)),"Site"="Sil"))
+prop.GxS.OTU.root<-rbind(data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='root' & Site=='Jam')$Taxon)),"Site"="Jam"),
+                         data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='root' & Site=='Mah')$Taxon)),"Site"="Mah"),
+                         data.frame("Taxon"=levels(factor(subset(l2fc.GxS.OTU,Tissue=='root' & Site=='Sil')$Taxon)),"Site"="Sil"))
+prop.GxS.OTU.leaf<-merge(prop.GxS.OTU.leaf,relabund.leaf.OTU,by="Taxon")
+prop.GxS.OTU.root<-merge(prop.GxS.OTU.root,relabund.root.OTU,by="Taxon")
+# combine leaf & root into one data frame:
+prop.GxS.OTU<-data.frame("Site"=factor(),"Tissue"=factor(),"Proportion"=numeric()) # initialize data frame
+for (i in 1:3){
+  site<-c("Jam","Mah","Sil")[i]
+  leafset<-data.frame("Site"=site,"Tissue"="leaf","Proportion"=sum(subset(prop.GxS.OTU.leaf,Site==site)$RelAbund))
+  rootset<-data.frame("Site"=site,"Tissue"="root","Proportion"=sum(subset(prop.GxS.OTU.root,Site==site)$RelAbund))
+  prop.GxS.OTU<-rbind(prop.GxS.OTU,leafset,rootset)
+}
+
+pdf(file="plots/Fig6d.pdf",width=9,height=9)
+ggplot(prop.GxS.OTU,aes(x=Tissue,y=Proportion,fill=Site))+
+  geom_bar(stat="identity",position="dodge")+
+  xlab("")+ylab("Cumulative relative abundance\nof OTUs differentially abundant\nbetween genotypes (%)\n")+
+  scale_fill_manual(values=sitePalette)+
+  theme_classic()+scale_y_continuous(labels=function(y) 100*y)+
+  theme(axis.text.x = element_text(size=36,face="bold"))+
+  theme(axis.title.x = element_blank(),axis.title.y=element_text(size=38,face="bold"))+
+  theme(legend.title= element_text(size=34,face="bold"),legend.text=element_text(size=28,face="bold"))+
+  theme(axis.text.y=element_text(size=30,face="bold"),legend.position=c(0.8,0.8))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2.5,"lines"),legend.key.width=unit(2.5,"lines"))
+dev.off()
+####### Fig 7c: Plot Phylum changes with age #######
+l2fc.phy.GxA.leaf<-subset(DEseq.all.GxA.phy,Level=='phy'&Tissue=='leaf'&Contrast%in%c('2_3','2_4')&Taxon%in%c("Acidobacteria","Proteobacteria","Actinobacteria"))
+levels(factor(l2fc.phy.GxA.leaf$Contrast))
+l2fc.phy.GxA.leaf.base<-rbind(within(l2fc.phy.GxA.leaf,{log2FoldChange<-0;lfcSE<-0;Contrast<-'2_2'}),l2fc.phy.GxA.leaf)
+l2fc.phy.GxA.leaf.base$Taxon<-mapvalues(l2fc.phy.GxA.leaf.base$Taxon,from=c("Acidobacteria","Actinobacteria","Proteobacteria"), to=c("Acido.","Actino.","Proteo."))
+
+pdf(file="plots/Fig7c.pdf",width=9,height=9)
+ggplot(l2fc.phy.GxA.leaf.base,aes(x=Contrast,y=baseMean*(2^log2FoldChange),color=Genotype,group=Genotype))+
+  facet_grid(Taxon~.,scales="free_y")+
+  geom_point(size=5,alpha=0.5,position=position_dodge(w=0.2))+
+  #geom_errorbar(aes(ymin=baseMean*(2^(log2FoldChange-lfcSE)), ymax=baseMean*(2^(log2FoldChange+lfcSE))), 
+  #                  width=.1,position=position_dodge(w=0.2))+
+  geom_line(size=2,position=position_dodge(w=0.2))+
+  scale_color_manual(values=popPalette,name="Genotype:")+
+  ylab("Mean number of observations")+
+  xlab("Plant age (years)")+
+  scale_x_discrete(breaks=c("2_2", "2_3", "2_4"),
+                   labels=c("2", "3", "4"))+
+  theme_minimal()+theme(legend.background=element_rect(fill="gray90",color="gray90"))+
+  theme(strip.text.y = element_text(size=32,face="bold"))+theme(legend.position="top",legend.key.height=unit(1.5,"lines"),legend.key.width=unit(1.5,"lines"))+
+  theme(axis.title.y = element_text(size=36,face="bold"),axis.text.y=element_text(size=24,face="bold"))+
+  theme(axis.title.x = element_text(size=36,face="bold"),axis.text.x=element_text(size=30,face="bold"))+
+  theme(legend.title = element_text(size=30,face="bold"),legend.text=element_text(size=28,face="bold"))+
+  theme(panel.margin = unit(1.5, "lines"),strip.background=element_rect(fill="gray90",color="gray90"))
+dev.off()
+####### Median effect sizes on OTU abundances: fold changes #######
+## Leaves: ##
+
+2^median(abs(subset(DEseq.all.site.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: site: 5.564
+2^median(abs(subset(DEseq.all.year.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: year: 2.587
+2^median(abs(subset(DEseq.all.geno.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: genotype: 3.048
+2^median(abs(subset(DEseq.all.GxS.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: GxS: 11.532
+2^median(abs(subset(DEseq.all.Age.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: Age: 3.078
+2^median(abs(subset(DEseq.all.GxA.OTU,Tissue=='leaf'&padjadj<0.05)$log2FoldChange)) # leaf: GxA: 6.830
+
+## Roots: ##
+
+2^median(abs(subset(DEseq.all.site.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: site: 2.793
+2^median(abs(subset(DEseq.all.year.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: year: 1.887
+2^median(abs(subset(DEseq.all.geno.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: genotype: 2.263
+2^median(abs(subset(DEseq.all.GxS.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: GxS: 4.740
+2^median(abs(subset(DEseq.all.Age.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: Age: 2.182
+2^median(abs(subset(DEseq.all.GxA.OTU,Tissue=='root'&padjadj<0.05)$log2FoldChange)) # root: GxA: 3.966
+
+####### OTUs shared between leaf and root of a single plant #######
+pairs<-intersect(levels(as(sample_data(leaf3.rlog),'data.frame')$Plant_ID),levels(as(sample_data(root3.rlog),'data.frame')$Plant_ID))
+length(pairs) # N= 176 plants with both leaf and root data
+####### --------- Begin analysis of >99% similarity OTUs: are a large proportion still shared between roots and leaves? #######
+# Load 99% OTU table with contaminants removed
+otu99<-as.data.frame(read.table("/Users/MW/Documents/Projects/Ecotypes_ubiome/otu99_data/otu99_noncontam_forR.txt",sep="\t",header=TRUE))
+
+# Reformat to Phyloseq-compatible matrix
+rownames(otu99)<-otu99[,1] # store OTU ID numbers as row names
+rownames(otu99)<-paste("OTU_",rownames(otu99),sep="") # add "OTU_" prefix to OTU IDs / row names
+otu99<-otu99[,-1] # remove column of OTU IDs
+
+otu99.mat<-as.matrix(otu99) # convert to matrix
+
+otu_table99<-otu_table(otu99.mat,taxa_are_rows=TRUE) # convert to Phyloseq "otu table" format
+
+## load taxonomy assignments
+taxfile<-as.matrix(read.table('/Users/MW/Documents/Projects/Ecotypes_ubiome/otu99_data/EdRedo_allplates_oldM1992_otus99_v2_tax_assignments_forR.txt',sep='\t',header=TRUE))
+dimnames(taxfile)[[1]]<-taxfile[,1]  # make OTU_IDs the row names
+taxfile<-taxfile[,-1] # get rid of OTU_ID column
+tax_table99<-tax_table(taxfile) # convert to Phyloseq "tax table" format
+
+## Make phyloseq object with entire dataset
+phylo99<-phyloseq(otu_table99,tax_table99)
+####### Quality control, thresholding, focusing on Ecotypes experiment only ####### 
+
+# Only keep samples from this current field experiment: this only contains samples with >= 800 usable reads
+phylo99<-prune_samples(sample_names(fieldEco.nobadOTUs.highcoverage.thresholded.CNC),phylo99) 
+phylo99<-prune_taxa(taxa_sums(phylo99)>0,phylo99) # remove OTUs with no observations
+
+# Throw out bad taxa
+phylo99<-subset_taxa(phylo99, Kingdom!='Unassigned')
+phylo99<-subset_taxa(phylo99, Class!='Chloroplast') # get rid of chloroplast
+phylo99<-subset_taxa(phylo99, Family!='mitochondria') # get rid of mitochondria
+####### Standard thresholding: 25x5 (throw out "non-reproducible" OTUs) #######
+threshold1<-kOverA(5,A=25) # set threshold values (require k samples with A reads)
+thresh1_99<-filter_taxa(phylo99,threshold1,TRUE) # 5862 of 273702 passed the threshold
+####### Only keep samples from plants that had both leaf and root data #######
+paired.leaf3<-subset_samples(leaf3,Plant_ID%in%pairs)
+paired.leaf3<-prune_taxa(taxa_sums(paired.leaf3)>0,paired.leaf3); ntaxa(paired.leaf3) # prune taxa with no observations
+pairedleaf3.99<-prune_samples(sample_names(paired.leaf3),thresh1_99) # only keep leaf samples with paired root data
+  
+paired.root3<-subset_samples(root3,Plant_ID%in%pairs)
+paired.root3<-prune_taxa(taxa_sums(paired.root3)>0,paired.root3); ntaxa(paired.root3) # prune taxa with no observations
+pairedroot3.99<-prune_samples(sample_names(paired.root3),thresh1_99) # only keep root samples with paired root data
+
+# throw out taxa with no observations in this dataset
+pairedleaf3.99<-prune_taxa(taxa_sums(pairedleaf3.99)>0,pairedleaf3.99); ntaxa(pairedleaf3.99) # 5193 OTUs remain
+pairedroot3.99<-prune_taxa(taxa_sums(pairedroot3.99)>0,pairedroot3.99); ntaxa(pairedroot3.99) # 5764 OTUs remain
+####### Copy sample metadata from the 97%-binned dataset #######
+# copy metadata
+sample_data(pairedleaf3.99)<-sample_data(paired.leaf3)
+sample_data(pairedroot3.99)<-sample_data(paired.root3)
+####### 99% binning: OTUs shared between root and leaf within a single plant #######
+pairedleaf3.99.RA<-transform_sample_counts(pairedleaf3.99,function(x) x/sum(x)) # transform to relative abundance
+pairedroot3.99.RA<-transform_sample_counts(pairedroot3.99,function(x) x/sum(x)) # transform to relative abundance
+
+unsharedrootOTUs.99<-data.frame("OTU_ID"=factor(),"Plant_ID"=factor(), "rootRA"=numeric())
+sharedOTUs.99<-data.frame("OTU_ID"=factor(),"Plant_ID"=factor(), "leafRA"=numeric(),"rootRA"=numeric())
+pairs.99<-data.frame("Plant_ID"=character(),"Shared_RelAbund_Leaf"=numeric(),"Shared_RelAbund_Root"=numeric())
+for (i in 1:length(pairs)){
+  plantID<-pairs[i] # look at one individual plant at a time
+  leafsubset<-subset_samples(pairedleaf3.99.RA,Plant_ID==plantID)
+  rootsubset0<-subset_samples(pairedroot3.99.RA,Plant_ID==plantID)
+  leafsubset<-prune_taxa(taxa_sums(leafsubset)>0,leafsubset) # prune taxa with no observations
+  rootsubset0<-prune_taxa(taxa_sums(rootsubset0)>0,rootsubset0) # prune taxa with no observations
+  sharedset<-intersect(taxa_names(leafsubset),taxa_names(rootsubset0))
+  unsharedset<-setdiff(taxa_names(rootsubset0),sharedset)
+  leafsubset<-prune_taxa(sharedset,leafsubset) # select only the shared set
+  rootsubset<-prune_taxa(sharedset,rootsubset0) # select only the shared set
+  unsharedrootsubset<-prune_taxa(unsharedset,rootsubset0) # select only the unshared set
+  pairs.99<-rbind(pairs.99,data.frame("Plant_ID"=plantID,"Shared_RelAbund_Leaf"=sum(taxa_sums(leafsubset)),"Shared_RelAbund_Root"=sum(taxa_sums(rootsubset))))
+  unsharedrootOTUs.99<-rbind(unsharedrootOTUs.99,
+                             data.frame("Plant_ID"=plantID,"OTU_ID"=taxa_names(unsharedrootsubset),"rootRA"=taxa_sums(unsharedrootsubset)))
+  sharedOTUs.99<-rbind(sharedOTUs.99,
+                       data.frame("Plant_ID"=plantID,"OTU_ID"=taxa_names(leafsubset),"leafRA"=taxa_sums(leafsubset),"rootRA"=taxa_sums(rootsubset)))
+}
+save.image("full_code_20150828_image.RData")
+
+
+summary(pairs.99) 
+# mean cumulative relative abundance of shared OTUs in leaves (weighted by relative abundance) = 0.7508
+# standard error:
+sd(pairs.99$Shared_RelAbund_Leaf) # = 0.1396
+# mean cumulative relative abundance of shared OTUs in roots = 0.2954
+sd(pairs.99$Shared_RelAbund_Root) # = 0.1472
+####### Fig 2a: barplot: cumulative relative abundance of shared set in roots and leaves #######
+pairs.99.wSMD<-merge(pairs.99,leaf3.smd[c("Site","Genotype","Harvested","Age","Line","Block","logObs","Plant_ID")],by="Plant_ID")
+pairs.99.wSMD<-melt(pairs.99.wSMD,measure.vars=c("Shared_RelAbund_Leaf","Shared_RelAbund_Root"),
+                    variable.name="Organ",value.name="RelAbund")
+
+pairs.99.wSMD.leaf<-subset(pairs.99.wSMD,Organ=='Shared_RelAbund_Leaf')
+pairs.99.wSMD.leaf$Plant_ID<-as.ordered(factor(pairs.99.wSMD.leaf$Plant_ID,levels=pairs.99.wSMD.leaf$Plant_ID[order(-pairs.99.wSMD.leaf$RelAbund)]))
+
+pdf(file="plots/Fig2a.pdf",height=9,width=9)
+ggplot(data=subset(pairs.99.wSMD.leaf,Organ=='Shared_RelAbund_Leaf'),aes(fill="in leaves", x=Plant_ID,y=RelAbund))+
+  geom_bar(stat="identity",width=1)+
+  geom_bar(data=subset(pairs.99.wSMD,Organ=='Shared_RelAbund_Root'),
+           aes(x=Plant_ID,y=RelAbund,fill="in roots"),stat="identity",width=1)+
+  xlab("Plant")+ylab("Cumulative relative abundance of OTUs\nshared between leaves and roots (%)\n")+
+  scale_fill_manual(values=c("in roots"="grey", "in leaves"="forest green"))+
+  theme_classic()+theme(axis.ticks = element_blank())+
+  theme(axis.text.x = element_blank())+scale_y_continuous(labels=function(y) 100*y)+
+  theme(axis.title.x = element_text(size=30,face="bold"),axis.title.y=element_text(size=30,face="bold"))+
+  theme(legend.title= element_blank(),legend.text=element_text(size=24,face="bold"))+
+  theme(axis.text.y=element_text(size=28,face="bold"),legend.position=c(0.8,0.9))+
+  theme(legend.background = element_rect(fill="gray95", size=.8))+
+  theme(legend.key.height=unit(2,"lines"),legend.key.width=unit(2,"lines"))
+dev.off()
+####### How much does relative abundance in roots predict relative abundance in leaves? #######
+# add sample metadata
+sharedOTUs.99.wSMD<-merge(sharedOTUs.99,leaf3.smd[c("Site","Genotype","Harvested","Age","Line","Block","logObs","Plant_ID")],by="Plant_ID")
+
+# double linear regression
+anova(lm(log(leafRA)~log(rootRA)+Site,data=sharedOTUs.99.wSMD))
+"""
+               Df Sum Sq Mean Sq  F value    Pr(>F)    
+log(rootRA)     1    177   177.5   54.161 1.864e-13 ***
+Site            2   8858  4429.1 1351.561 < 2.2e-16 ***
+Residuals   84665 277448     3.3                    
+"""
+summary(lm(log(leafRA)~log(rootRA)+Site,data=sharedOTUs.99.wSMD))$adj.r.squared # 0.03150551
+summary(lm(log(leafRA)~Site,data=sharedOTUs.99.wSMD))$adj.r.squared # 0.031048
+# difference in adj. r squared = 0.00045798
+
+####### Fig 2b: Scatterplot of relative abundance of shared vs. unshared OTUs in roots #######
+# Get relative abundances of all OTUs (not just shared OTUs) in roots of the set of 176 plants with both leaf and root data:
+all.root.OTUs.inPairs.99<-data.frame("OTU_ID"=taxa_names(pairedroot3.99),
+                                     "RelAbund"=taxa_sums(pairedroot3.99)/sum(taxa_sums(pairedroot3.99)))
+all.root.OTUs.inPairs.99<-all.root.OTUs.inPairs.99[order(-all.root.OTUs.inPairs.99$RelAbund),] # sort by decreasing relative abundance in roots
+all.root.OTUs.inPairs.99$Shared<-factor(ifelse(all.root.OTUs.inPairs.99$OTU_ID %in% levels(factor(sharedOTUs.99$OTU_ID)),
+                                               "Y","N"))
+all.root.OTUs.inPairs.99$OTU_ID<-reorder(all.root.OTUs.inPairs.99$OTU_ID,-all.root.OTUs.inPairs.99$RelAbund,ordered=TRUE)
+all.root.OTUs.inPairs.99$OTU_ID<-factor(all.root.OTUs.inPairs.99$OTU_ID, levels=all.root.OTUs.inPairs.99$OTU_ID[order(-all.root.OTUs.inPairs.99$RelAbund)])
+all.root.OTUs.inPairs.99<-arrange(all.root.OTUs.inPairs.99,OTU_ID)
+
+# Get relative abundances of all OTUs in leaves (not just shared OTUs) of the set of 176 plants with both leaf and leaf data:
+all.leaf.OTUs.inPairs.99<-data.frame("OTU_ID"=taxa_names(pairedleaf3.99),
+                                     "RelAbund"=taxa_sums(pairedleaf3.99)/sum(taxa_sums(pairedleaf3.99)))
+all.leaf.OTUs.inPairs.99<-all.leaf.OTUs.inPairs.99[order(-all.leaf.OTUs.inPairs.99$RelAbund),] # sort by decreasing relative abundance in leaves
+all.leaf.OTUs.inPairs.99$Shared<-factor(ifelse(all.leaf.OTUs.inPairs.99$OTU_ID %in% levels(factor(sharedOTUs.99$OTU_ID)),
+                                               "Y","N"))
+all.leaf.OTUs.inPairs.99$OTU_ID<-reorder(all.leaf.OTUs.inPairs.99$OTU_ID,-all.leaf.OTUs.inPairs.99$RelAbund,ordered=TRUE)
+all.leaf.OTUs.inPairs.99$OTU_ID<-factor(all.leaf.OTUs.inPairs.99$OTU_ID, levels=all.leaf.OTUs.inPairs.99$OTU_ID[order(-all.leaf.OTUs.inPairs.99$RelAbund)])
+all.leaf.OTUs.inPairs.99<-arrange(all.leaf.OTUs.inPairs.99,OTU_ID)
+
+pdf(file="plots/Fig2b.pdf",width=9,height=9)
+ggplot(data=all.root.OTUs.inPairs.99,aes(x=OTU_ID,y=log(RelAbund),color="in roots"))+
+  geom_point(size=3,alpha=0.6)+
+  ylab("Relative abundance")+
+  xlab("OTU (binned at 99%)")+scale_x_discrete(breaks=NULL)+
+  geom_point(data=subset(all.leaf.OTUs.inPairs.99,Shared=='Y'),size=3,alpha=0.6,
+             aes(x=OTU_ID,y=log(RelAbund),color="in leaves"))+
+  scale_y_continuous(labels=function(y) paste0(format(100*exp(y),drop0trailing=TRUE,scientific=FALSE),"%"),
+                     breaks=c(log(0.0000001),log(0.000001),log(0.00001),log(0.0001),log(0.001),log(0.01),log(0.1)))+
+  theme_classic()+
+  scale_color_manual(values=c("in roots"="black","in leaves"="forest green"))+
+  theme(axis.title.x = element_text( size=30,face="bold"),
+        axis.title.y  = element_text(size=30,face="bold"),
+        axis.text.y=element_text(size=28,face="bold"),legend.background = element_rect(fill="gray95"),
+        legend.position=c(0.6,0.9),legend.title=element_blank(),
+        legend.text=element_text(size=30,face="bold"),legend.key.height=unit(2,'lines'),legend.key.width=unit(2,'lines'))
+dev.off()
+####### What % of shared OTUs had lower rel. abundance in leaves than in roots? #######
+length(subset(sharedOTUs.99,leafRA<rootRA)$OTU_ID)/length(sharedOTUs.99$OTU_ID) # 44.976%
+
+####### What % of shared OTUs were also found in bulk soil? #######
+soil.3.99<-prune_samples(sample_names(soil.3),thresh1_99) # get phyloseq object for 99%-binned soil samples
+soil.3.99<-prune_taxa(taxa_sums(soil.3.99)>0,soil.3.99) # remove OTUs with no observations
+
+sharedset.99<-subset(all.leaf.OTUs.inPairs.99,Shared=='Y')$OTU_ID
+length(sharedset.99) # a total of 4,598 leaf-root shared OTUs binned at 99%
+length(intersect(sharedset.99,taxa_names(soil.3.99))) # 4,184
+## 90.996% of those shared OTUs were present in our 21 bulk soil samples
